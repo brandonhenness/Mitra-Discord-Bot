@@ -32,12 +32,6 @@ class CustomFormatter(logging.Formatter):
     
 formatter = CustomFormatter()
 
-# discord_logger = logging.getLogger('discord')
-# discord_logger.setLevel(logging.INFO)
-
-# for handler in discord_logger.handlers:
-#     handler.setFormatter(formatter)
-
 handler = logging.StreamHandler()
 handler.setFormatter(CustomFormatter())
 root_logger = logging.getLogger()
