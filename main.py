@@ -2,6 +2,15 @@ import json
 import requests
 import discord
 from discord.ext import commands, tasks
+import os
+
+if not os.path.isfile("config.py"):
+    with open("config.py", "w") as file:
+        TOKEN = input("Please enter the bot token: ")
+        CHANNEL = input("Please enter the channel ID: ")
+        file.write(f"TOKEN = \"{TOKEN}\"\n")
+        file.write(f"CHANNEL = {CHANNEL}\n")
+
 from config import TOKEN, CHANNEL
 
 bot = commands.Bot(command_prefix=None, intents=discord.Intents.default())
