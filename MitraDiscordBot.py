@@ -38,18 +38,53 @@ root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 root_logger.addHandler(handler)
 
+def get_valid_token():
+    while True:
+        token = input("Please enter the bot token (72 characters): ").strip()
+        if len(token) == 72:
+            return token
+        else:
+            logging.warning("Invalid input. The bot token must be exactly 72 characters.")
+
+def get_valid_channel_id():
+    while True:
+        channel_id = input("Please enter the channel ID (18 digits): ").strip()
+        if channel_id.isdigit() and len(channel_id) == 18:
+            return int(channel_id)
+        else:
+            logging.warning("Invalid input. The channel ID must be exactly 18 digits.")
+
 if not os.path.isfile("cache.json"):
     logging.info("No cache file found, creating one...")
     with open("cache.json", "w") as file:
-        TOKEN = input("Please enter the bot token: ")
-        CHANNEL = input("Please enter the channel ID: ")
+        TOKEN = get_valid_token()
+        CHANNEL = get_valid_channel_id()
         json.dump({"token": TOKEN, "channel": CHANNEL}, file)
 
-with open("cache.json", "r") as file:
-    data = json.load(file)
-    TOKEN = data["token"]
-    CHANNEL = int(data["channel"])
-    logging.info("Cache file loaded")
+try:
+    logging.info("Loading cache file...")
+    with open("cache.json", "r") as file:
+        data = json.load(file)  
+        TOKEN = data.get("token", "")
+        CHANNEL = data.get("channel", 0)
+        if not TOKEN or len(TOKEN) != 72:
+            logging.warning("Invalid token in cache file, please enter a valid token.")
+            TOKEN = get_valid_token()
+            data["token"] = TOKEN
+        if not CHANNEL or not (isinstance(CHANNEL, int) and len(str(CHANNEL)) == 18):
+            logging.warning("Invalid channel ID in cache file, please enter a valid channel ID.")
+            CHANNEL = get_valid_channel_id()
+            data["channel"] = CHANNEL
+        if not TOKEN or not CHANNEL:
+            with open("cache.json", "w") as file:
+                json.dump(data, file)
+        logging.info("Cache file loaded")
+except json.JSONDecodeError:
+    logging.error("Error reading cache file. Please check its content.")
+    raise
+except ValueError:
+    logging.error("Invalid data in cache file.")
+    raise
 
 bot = commands.Bot(command_prefix=None, intents=discord.Intents.default())
 
@@ -121,6 +156,7 @@ async def check_ip() -> None:
         logging.error(f"Failed to check IP address:\n```{e}```")
     finally:
         logging.info("IP address check complete")
+        logging.info("Waiting 60 minutes before checking again...")
 
 @bot.tree.command(name="ip", description="Get Mitra's external IP address.")
 async def ip(interaction: discord.Interaction) -> None:
