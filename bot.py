@@ -153,7 +153,7 @@ async def save_subscribers(subscribers:set) -> None:
 
     logging.info(f"Subscribers saved to cache file: {', '.join([str(subscriber) for subscriber in subscribers])}")
 
-async def load_subscribers() -> set:
+def load_subscribers() -> set:
     '''Load the list of subscribers from the cache.json file.
     
     Returns:
@@ -192,7 +192,7 @@ async def check_ip() -> None:
         if current_ip != stored_ip:
             logging.info(f"IP address changed from {stored_ip} to {current_ip}")
             for subscriber in subscribers:
-                user = await bot.get_user(subscriber)
+                user = await bot.fetch_user(subscriber)
                 if user:
                     await user.send(f"Mitra's IP address has changed to:\n```{current_ip}```")
                     logging.info(f"IP change alert sent to user {subscriber}")
@@ -215,7 +215,7 @@ async def ip(interaction: discord.Interaction) -> None:
     
     Args:
         interaction (discord.Interaction): The interaction that triggered this command.'''
-    logging.info("IP command called by {interaction.user.name}#{interaction.user.discriminator}")
+    logging.info(f"IP command called by {interaction.user.name}#{interaction.user.discriminator}")
     try:
         ip = await get_ip()
         await interaction.response.send_message(f"IP address:\n```{ip}```", ephemeral=True)
@@ -229,7 +229,7 @@ async def ping(interaction: discord.Interaction) -> None:
     
     Args:
         interaction (discord.Interaction): The interaction that triggered this command.'''
-    logging.info("Ping command called by {interaction.user.name}#{interaction.user.discriminator}")
+    logging.info(f"Ping command called by {interaction.user.name}#{interaction.user.discriminator}")
     try:
         await interaction.response.send_message(f"Pong! {round(bot.latency * 1000)}ms", ephemeral=True)
     except Exception as e:
@@ -242,16 +242,18 @@ async def subscribe(interaction: discord.Interaction) -> None:
 
     Args:
         interaction (discord.Interaction): The interaction that triggered this command.'''
-    logging.info("Subscribe command called by {interaction.user.name}#{interaction.user.discriminator}")
+    logging.info(f"Subscribe command called by {interaction.user.id}, {interaction.user.name}")
     try:
-        if subscribers.__contains__(interaction.user.id):
-            await interaction.response.send_message(f"Already subscribed to IP change alerts.", ephemeral=True)
+        if interaction.user.id in subscribers:
+            await interaction.response.send_message(f"You are already subscribed to IP change alerts.", ephemeral=True)
             logging.info(f"User {interaction.user.id} already subscribed to IP change alerts.")
             return
         subscribers.add(interaction.user.id)
-        save_subscribers(subscribers)
-        await interaction.response.send_message(f"Subscribed to IP change alerts.", ephemeral=True)
+        await interaction.response.send_message(f"Your subscription to IP change alerts has been confirmed.", ephemeral=True)
         logging.info(f"User {interaction.user.id} subscribed to IP change alerts.")
+        await interaction.user.send(f"You have subscribed to IP change alerts. You will be notified here when Mitra's IP address changes.\n\nTo unsubscribe, use the `/unsubscribe` command.\n\nThe current IP address is:\n```{await get_ip()}```")
+        logging.info(f"IP change alert subscription confirmation sent to user {interaction.user.id}")
+        await save_subscribers(subscribers)
     except Exception as e:
         await interaction.response.send_message(f"Failed to subscribe:\n```{e}```", ephemeral=True)
         logging.error(f"Failed to subscribe: {e}")
@@ -263,15 +265,15 @@ async def unsubscribe(interaction: discord.Interaction) -> None:
     
     Args:
         interaction (discord.Interaction): The interaction that triggered this command.'''
-    logging.info("Unsubscribe command called by {interaction.user.name}#{interaction.user.discriminator}")
+    logging.info(f"Unsubscribe command called by {interaction.user.name}#{interaction.user.discriminator}")
     try:
         if not subscribers.__contains__(interaction.user.id):
-            await interaction.response.send_message(f"Not subscribed to IP change alerts.", ephemeral=True)
+            await interaction.response.send_message(f"You are not subscribed to IP change alerts.", ephemeral=True)
             logging.info(f"User {interaction.user.id} not subscribed to IP change alerts.")
             return
         subscribers.remove(interaction.user.id)
-        save_subscribers(subscribers)
-        await interaction.response.send_message(f"Unsubscribed from IP change alerts.", ephemeral=True)
+        await save_subscribers(subscribers)
+        await interaction.response.send_message(f"You have unsubscribed from IP change alerts.", ephemeral=True)
         logging.info(f"User {interaction.user.id} unsubscribed from IP change alerts.")
     except Exception as e:
         await interaction.response.send_message(f"Failed to unsubscribe:\n```{e}```", ephemeral=True)
@@ -283,12 +285,36 @@ async def list_subscribers(interaction: discord.Interaction) -> None:
     
     Args:
         interaction (discord.Interaction): The interaction that triggered this command.'''
-    logging.info("Subscribers command called by {interaction.user.name}#{interaction.user.discriminator}")
+    logging.info(f"Subscribers command called by {interaction.user.id}, {interaction.user.name}")
     try:
         if len(subscribers) == 0:
             await interaction.response.send_message(f"No subscribers.", ephemeral=True)
+            logging.info(f"No subscribers.")
         else:
-            await interaction.response.send_message(f"Subscribers:\n```{', '.join([str(subscriber) for subscriber in subscribers])}```", ephemeral=True)
+            subscriber_names = []
+            bad_subscribers = []
+            logging.info(f"looking up {len(subscribers)} subscribers...")
+            for subscriber in subscribers:
+                try:
+                    user = await bot.fetch_user(subscriber)
+                    if user:
+                        subscriber_names.append(f"{user.id}: {user.name}")
+                    else:
+                        bad_subscribers.append(subscriber)
+                except discord.NotFound:
+                    bad_subscribers.append(subscriber)
+            if len(bad_subscribers) > 0:
+                logging.warning(f"Failed to look up {len(bad_subscribers)} subscribers: {', '.join([str(subscriber) for subscriber in bad_subscribers])}")
+                for subscriber in bad_subscribers:
+                    subscribers.remove(subscriber)
+                    logging.info(f"Removed subscriber {subscriber} from list")
+                await save_subscribers(subscribers)
+            if len(subscriber_names) == 0:
+                await interaction.response.send_message(f"No subscribers.", ephemeral=True)
+                logging.info(f"No subscribers.")
+            else:
+                await interaction.response.send_message(f"Subscribers:\n```{', '.join([str(subscriber) for subscriber in subscriber_names])}```", ephemeral=True)
+                logging.info(f"Subscribers: {', '.join([str(subscriber) for subscriber in subscribers])}")
     except Exception as e:
         await interaction.response.send_message(f"Failed to list subscribers:\n```{e}```", ephemeral=True)
         logging.error(f"Failed to list subscribers: {e}")
