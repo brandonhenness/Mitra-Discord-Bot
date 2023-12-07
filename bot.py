@@ -65,73 +65,75 @@ def load_connection_data() -> tuple:
     '''Load the connection data from the cache file.
 
     Returns:
-        tuple: The bot token and channel ID.'''
+        tuple: A tuple containing the bot token, channel ID, Cloudflare API key, Cloudflare email, Cloudflare zone ID, and Cloudflare DNS record IDs.'''
     try:
+        data = {}
         logging.info("Loading cache file...")
-        with open("cache.json", "r") as file:
-            data = json.load(file)  
-            token = data.get("token", "")
-            channel = data.get("channel", 0)
-            api_key = data.get("api_key", "")
-            email = data.get("email", "")
-            zone_id = data.get("zone_id", "")
-            record_ids = data.get("record_ids", [])
-            if not token or len(token) != 72:
-                logging.warning("Invalid token in cache file, please enter a valid token.")
-                token = get_valid_token()
-                data["token"] = token
-            if not channel or not (isinstance(channel, int) and len(str(channel)) == 18):
-                logging.warning("Invalid channel ID in cache file, please enter a valid channel ID.")
-                channel = get_valid_channel_id()
-                data["channel"] = channel
-            if not api_key:
-                logging.warning("Invalid API key in cache file, please enter a valid API key.")
-                api_key = input("Please enter your Cloudflare API key: ").strip()
-                data["api_key"] = api_key
-            if not email:
-                logging.warning("Invalid email in cache file, please enter a valid email.")
-                email = input("Please enter your Cloudflare email: ").strip()
-                data["email"] = email
-            if not zone_id:
-                logging.warning("Invalid zone ID in cache file, please enter a valid zone ID.")
-                zones = get_zones(api_key, email)
-                if zones:
-                    for i, zone in enumerate(zones):
-                        print(f"{i}: {zone['name']}")
-                    zone_index = int(input("Select a zone by entering the corresponding number: "))
-                    selected_zone = zones[zone_index]
-                    data["zone_id"] = selected_zone['id']
-            if len(record_ids) == 0:
-                logging.warning("Invalid record IDs in cache file, please enter valid record IDs.")
-                records = get_dns_records(api_key, email, zone_id)
-                record_ids_temp = []
-                if records:
-                    while True:
-                        for i, record in enumerate(records):
-                            print(f"{i}: {record['type']} {record['name']} -> {record['content']}")
-                        record_index = int(input("Select a record to update by entering the corresponding number (or -1 to finish): "))
-                        if record_index == -1:
-                            break
-                        record_ids_temp.append(records[record_index]['id'])
-                    data["record_ids"] = record_ids_temp
-            if not token or not channel or not api_key or not email or not zone_id or len(record_ids) == 0:
-                with open("cache.json", "w") as file:
-                    json.dump(data, file)
-            logging.info("Cache file loaded")
-        return token, channel, api_key, email, zone_id, record_ids
-    except json.JSONDecodeError:
-        logging.error("Error reading cache file. Please check its content.")
-        raise
-    except ValueError:
-        logging.error("Invalid data in cache file.")
-        raise
-    except FileNotFoundError:
-        logging.error("Cache file not found.")
-        logging.info("Creating cache file...")
+        try:
+            with open("cache.json", "r") as file:
+                data = json.load(file)
+        except (FileNotFoundError, json.JSONDecodeError):
+            logging.warning("Cache file not found or invalid. Creating cache file...")
+
+        token = data.get("token", "")
+        channel = data.get("channel", 0)
+        api_key = data.get("api_key", "")
+        email = data.get("email", "")
+        zone_id = data.get("zone_id", "")
+        record_ids = data.get("record_ids", [])
+
+        if not token or len(token) != 72:
+            logging.warning("Invalid token in cache file, please enter a valid token.")
+            token = get_valid_token()
+            data["token"] = token
+
+        if not channel or not (isinstance(channel, int) and len(str(channel)) == 18):
+            logging.warning("Invalid channel ID in cache file, please enter a valid channel ID.")
+            channel = get_valid_channel_id()
+            data["channel"] = channel
+
+        if not api_key:
+            logging.warning("Invalid API key in cache file, please enter a valid API key.")
+            api_key = input("Please enter your Cloudflare API key: ").strip()
+            data["api_key"] = api_key
+
+        if not email:
+            logging.warning("Invalid email in cache file, please enter a valid email.")
+            email = input("Please enter your Cloudflare email: ").strip()
+            data["email"] = email
+
+        if not zone_id:
+            logging.warning("Invalid zone ID in cache file, please enter a valid zone ID.")
+            zones = get_zones(api_key, email)
+            if zones:
+                for i, zone in enumerate(zones):
+                    print(f"{i}: {zone['name']}")
+                zone_index = int(input("Select a zone by entering the corresponding number: "))
+                selected_zone = zones[zone_index]
+                data["zone_id"] = selected_zone['id']
+
+        if len(record_ids) == 0:
+            logging.warning("Invalid record IDs in cache file, please enter valid record IDs.")
+            records = get_dns_records(api_key, email, zone_id)
+            record_ids_temp = []
+            if records:
+                while True:
+                    for i, record in enumerate(records):
+                        print(f"{i}: {record['type']} {record['name']} -> {record['content']}")
+                    record_index = int(input("Select a record to update by entering the corresponding number (or -1 to finish): "))
+                    if record_index == -1:
+                        break
+                    record_ids_temp.append(records[record_index]['id'])
+                data["record_ids"] = record_ids_temp
+
         with open("cache.json", "w") as file:
-            pass
-        logging.info("Cache file created.")
-        load_connection_data()
+            json.dump(data, file)
+
+        logging.info("Cache file loaded")
+        return token, channel, api_key, email, zone_id, record_ids
+    except ValueError:
+        logging.error("Failed to load cache file.")
+        raise
 
 async def get_ip() -> str:
     '''Get the external IP address of the machine running this bot.
