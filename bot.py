@@ -404,6 +404,30 @@ async def list_subscribers(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(f"Failed to list subscribers:\n```{e}```", ephemeral=True)
         logging.error(f"Failed to list subscribers: {e}")
 
+@bot.event
+async def on_slash_command_error(ctx, error):
+    '''Handle errors that occur when a slash command is used.
+    
+    Args:
+        ctx (discord.ext.commands.Context): The context of the command.
+        error (discord.ext.commands.CommandError): The error that occurred.'''
+    if isinstance(error, commands.errors.CommandNotFound):
+        pass
+    else:
+        raise error
+    
+@bot.event
+async def on_command_error(ctx, error):
+    '''Handle errors that occur when a command is used.
+    
+    Args:
+        ctx (discord.ext.commands.Context): The context of the command.
+        error (discord.ext.commands.CommandError): The error that occurred.'''
+    if isinstance(error, commands.errors.CommandNotFound):
+        pass
+    else:
+        raise error
+
 if __name__ == "__main__":
     formatter = CustomFormatter()
 
