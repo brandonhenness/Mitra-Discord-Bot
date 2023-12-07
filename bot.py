@@ -72,6 +72,10 @@ def load_connection_data() -> tuple:
             data = json.load(file)  
             token = data.get("token", "")
             channel = data.get("channel", 0)
+            api_key = data.get("api_key", "")
+            email = data.get("email", "")
+            zone_id = data.get("zone_id", "")
+            record_ids = data.get("record_ids", [])
             if not token or len(token) != 72:
                 logging.warning("Invalid token in cache file, please enter a valid token.")
                 token = get_valid_token()
@@ -80,11 +84,41 @@ def load_connection_data() -> tuple:
                 logging.warning("Invalid channel ID in cache file, please enter a valid channel ID.")
                 channel = get_valid_channel_id()
                 data["channel"] = channel
-            if not token or not channel:
+            if not api_key:
+                logging.warning("Invalid API key in cache file, please enter a valid API key.")
+                api_key = input("Please enter your Cloudflare API key: ").strip()
+                data["api_key"] = api_key
+            if not email:
+                logging.warning("Invalid email in cache file, please enter a valid email.")
+                email = input("Please enter your Cloudflare email: ").strip()
+                data["email"] = email
+            if not zone_id:
+                logging.warning("Invalid zone ID in cache file, please enter a valid zone ID.")
+                zones = get_zones(api_key, email)
+                if zones:
+                    for i, zone in enumerate(zones):
+                        print(f"{i}: {zone['name']}")
+                    zone_index = int(input("Select a zone by entering the corresponding number: "))
+                    selected_zone = zones[zone_index]
+                    data["zone_id"] = selected_zone['id']
+            if len(record_ids) == 0:
+                logging.warning("Invalid record IDs in cache file, please enter valid record IDs.")
+                records = get_dns_records(api_key, email, zone_id)
+                record_ids_temp = []
+                if records:
+                    while True:
+                        for i, record in enumerate(records):
+                            print(f"{i}: {record['type']} {record['name']} -> {record['content']}")
+                        record_index = int(input("Select a record to update by entering the corresponding number (or -1 to finish): "))
+                        if record_index == -1:
+                            break
+                        record_ids_temp.append(records[record_index]['id'])
+                    data["record_ids"] = record_ids_temp
+            if not token or not channel or not api_key or not email or not zone_id or len(record_ids) == 0:
                 with open("cache.json", "w") as file:
                     json.dump(data, file)
             logging.info("Cache file loaded")
-        return token, channel
+        return token, channel, api_key, email, zone_id, record_ids
     except json.JSONDecodeError:
         logging.error("Error reading cache file. Please check its content.")
         raise
@@ -170,6 +204,53 @@ def load_subscribers() -> set:
     except FileNotFoundError:
         logging.error("Cache file not found.")
 
+def get_zones(api_key, email):
+    url = "https://api.cloudflare.com/client/v4/zones"
+    headers = {
+        'X-Auth-Email': email,
+        'X-Auth-Key': api_key,
+        'Content-Type': 'application/json',
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()['result']
+    else:
+        print("Failed to retrieve zones.")
+        return None
+
+def get_dns_records(api_key, email, zone_id):
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records"
+    headers = {
+        'X-Auth-Email': email,
+        'X-Auth-Key': api_key,
+        'Content-Type': 'application/json',
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()['result']
+    else:
+        print("Failed to retrieve DNS records.")
+        return None
+
+async def update_dns_record(api_key, email, zone_id, record_id, ip):
+    headers = {
+        'X-Auth-Email': email,
+        'X-Auth-Key': api_key,
+        'Content-Type': 'application/json',
+    }
+    url = f"https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{record_id}"
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        logging.error(f"Failed to retrieve DNS record {record_id}.")
+        return
+    record = response.json()['result']
+    record['content'] = ip
+    response = requests.put(url, headers=headers, json=record)
+    if response.status_code == 200:
+        logging.info(f"DNS record {record['name']} updated successfully!")
+    else:
+        logging.error(f"Failed to update DNS record {record['name']}.")
+
 @bot.event
 async def on_ready() -> None:
     '''Perform startup tasks when the bot is ready.'''
@@ -202,9 +283,11 @@ async def check_ip() -> None:
             if channel:
                 await channel.send(f"Mitra's IP address has changed to:\n```{current_ip}```")
                 logging.info(f"IP change alert sent to channel {CHANNEL}")
+            for record in RECORD_IDS:
+                await update_dns_record(API_KEY, EMAIL, ZONE_ID, record, current_ip)
             await save_ip(current_ip)
     except Exception as e:
-        logging.error(f"Failed to check IP address:\n```{e}```")
+        logging.error(f"Failed to check IP address: {e}")
     finally:
         logging.info("IP address check complete")
         logging.info("Waiting 60 minutes before checking again...")
@@ -336,7 +419,8 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    TOKEN, CHANNEL = load_connection_data()
+    TOKEN, CHANNEL, API_KEY, EMAIL, ZONE_ID, RECORD_IDS = load_connection_data()
+
     subscribers = load_subscribers()
     logging.info("Starting bot...")
     bot.run(TOKEN)
