@@ -6,7 +6,7 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
-bot = commands.Bot(command_prefix=None, intents=discord.Intents.default())
+bot = commands.Bot(command_prefix='$', intents=discord.Intents.default())
 
 class LogColors:
     GRAY = "\x1b[90m"  # Bright black (gray)
