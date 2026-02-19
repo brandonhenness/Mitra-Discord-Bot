@@ -58,7 +58,7 @@ class PowerCog(commands.Cog):
         ),
     ) -> None:
         # ensure_admin is async (it calls ctx.respond), so it MUST be awaited
-        if await ensure_admin(ctx):
+        if ensure_admin(ctx):
             return
 
         if confirm.strip().upper() != "RESTART":
@@ -141,7 +141,7 @@ class PowerCog(commands.Cog):
             default=False,
         ),
     ) -> None:
-        if await ensure_admin(ctx):
+        if ensure_admin(ctx):
             return
 
         if confirm.strip().upper() != "SHUTDOWN":
@@ -201,7 +201,7 @@ class PowerCog(commands.Cog):
             required=True,
         ),
     ) -> None:
-        if await ensure_admin(ctx):
+        if ensure_admin(ctx):
             return
 
         if confirm.strip().upper() != "CANCEL":
