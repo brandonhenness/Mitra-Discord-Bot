@@ -1,6 +1,7 @@
 # mitra_bot/discord_app/cogs/ups_cog.py
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional
 
 import discord
@@ -44,6 +45,97 @@ def _safe_int(value: Any) -> Optional[int]:
         return int(float(value))
     except Exception:
         return None
+
+
+def _parse_duration_to_seconds(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+
+    # Numeric (seconds)
+    s_int = _safe_int(value)
+    if s_int is not None:
+        return s_int
+
+    if not isinstance(value, str):
+        return None
+
+    text = value.strip().lower()
+    if not text:
+        return None
+
+    # hh:mm:ss or mm:ss
+    if ":" in text:
+        parts = [p.strip() for p in text.split(":")]
+        if all(p.isdigit() for p in parts):
+            nums = [int(p) for p in parts]
+            if len(nums) == 2:
+                return nums[0] * 60 + nums[1]
+            if len(nums) == 3:
+                return nums[0] * 3600 + nums[1] * 60 + nums[2]
+
+    # Text with units, e.g. "12 minutes", "1h 5m 10s"
+    total = 0
+    matched = False
+    for num_s, unit in re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]+)", text):
+        try:
+            num = float(num_s)
+        except Exception:
+            continue
+
+        if unit.startswith("h"):
+            total += int(num * 3600)
+            matched = True
+        elif unit.startswith("m"):
+            total += int(num * 60)
+            matched = True
+        elif unit.startswith("s"):
+            total += int(num)
+            matched = True
+
+    if matched:
+        return total
+
+    # Last resort: first number interpreted as seconds
+    m = re.search(r"\d+(?:\.\d+)?", text)
+    if m:
+        try:
+            return int(float(m.group(0)))
+        except Exception:
+            return None
+
+    return None
+
+
+def _find_runtime_value(obj: Any) -> Optional[Any]:
+    runtime_key_variants = {
+        "time_to_empty_seconds",
+        "time_to_empty_s",
+        "time_to_empty",
+        "time to empty",
+    }
+
+    def _norm(key: str) -> str:
+        return " ".join(key.strip().lower().replace("_", " ").split())
+
+    want = {_norm(k) for k in runtime_key_variants}
+
+    def _walk(node: Any) -> Optional[Any]:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if _norm(str(k)) in want:
+                    return v
+            for v in node.values():
+                found = _walk(v)
+                if found is not None:
+                    return found
+        elif isinstance(node, list):
+            for item in node:
+                found = _walk(item)
+                if found is not None:
+                    return found
+        return None
+
+    return _walk(obj)
 
 
 def _get_nested(d: Dict[str, Any], path: str, default=None):
@@ -244,8 +336,8 @@ class UPSCog(commands.Cog):
         batt_percent = _get_nested(live, "battery_percent", None)
         health = _get_nested(live, "health", None)
 
-        # time-to-empty: support all known key variants
-        tte = None
+        # time-to-empty: support all known key variants and string formats
+        tte: Optional[int] = None
         for key in (
             "time_to_empty_seconds",
             "time_to_empty_s",
@@ -256,17 +348,27 @@ class UPSCog(commands.Cog):
             "status.time_to_empty",
             "status.time to empty",
         ):
-            tte = _safe_int(_get_nested(live, key, None))
+            tte = _parse_duration_to_seconds(_get_nested(live, key, None))
             if tte is not None:
                 break
+
+        if tte is None:
+            tte = _parse_duration_to_seconds(_find_runtime_value(live))
 
         # Fallback to latest log sample if live snapshot does not contain runtime
         if tte is None and recent_rows:
             last = recent_rows[-1]
-            for key in ("time_to_empty_seconds", "time_to_empty_s", "time_to_empty", "time to empty"):
-                tte = _safe_int(last.get(key))
+            for key in (
+                "time_to_empty_seconds",
+                "time_to_empty_s",
+                "time_to_empty",
+                "time to empty",
+            ):
+                tte = _parse_duration_to_seconds(last.get(key))
                 if tte is not None:
                     break
+            if tte is None:
+                tte = _parse_duration_to_seconds(_find_runtime_value(last))
 
         # Input/output details
         in_v = _get_nested(live, "input_voltage", None)
@@ -335,7 +437,8 @@ class UPSCog(commands.Cog):
 
         if graph:
             file = discord.File(graph, filename="ups_status.png")
-            await ctx.respond(file=file, embed=embed, ephemeral=True)
+            embed.set_image(url="attachment://ups_status.png")
+            await ctx.respond(embed=embed, file=file, ephemeral=True)
         else:
             await ctx.respond(
                 embed=embed,
