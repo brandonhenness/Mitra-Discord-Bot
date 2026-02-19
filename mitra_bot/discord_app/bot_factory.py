@@ -1,0 +1,45 @@
+# mitra_bot/discord_app/bot_factory.py
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from typing import Optional
+
+import discord
+
+
+@dataclass
+class AppState:
+    channel_id: Optional[int]
+    admin_role_name: str
+    ip_subscriber_role_name: str
+
+
+def create_bot(*, state: AppState) -> discord.Bot:
+    intents = discord.Intents.default()
+    intents.guilds = True
+    intents.members = (
+        False  # keep off (privileged). We do not need it for interaction role checks.
+    )
+    intents.message_content = False
+
+    bot = discord.Bot(intents=intents)
+    bot.state = state  # type: ignore[attr-defined]
+
+    _register_cogs(bot)
+    return bot
+
+
+def _register_cogs(bot: discord.Bot) -> None:
+    try:
+        from mitra_bot.discord_app.cogs.ip_cog import IPCog
+        from mitra_bot.discord_app.cogs.power_cog import PowerCog
+        from mitra_bot.discord_app.cogs.ups_cog import UPSCog
+
+        bot.add_cog(IPCog(bot))  # type: ignore[arg-type]
+        bot.add_cog(PowerCog(bot))  # type: ignore[arg-type]
+        bot.add_cog(UPSCog(bot))  # type: ignore[arg-type]
+
+        logging.info("Cogs registered.")
+    except Exception:
+        logging.exception("Cog registration failed.")
