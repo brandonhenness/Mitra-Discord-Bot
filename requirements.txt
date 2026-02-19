@@ -1,6 +1,6 @@
-py-cord
-aiohttp
-requests
-tripplite
-matplotlib
-tzdata
+py-cord>=2.4,<3
+aiohttp>=3.8,<4
+requests>=2.31,<3
+tripplite>=0.4,<1
+matplotlib>=3.7,<4
+tzdata>=2023.3
