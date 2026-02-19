@@ -37,6 +37,15 @@ def _fmt_seconds(seconds: Optional[int]) -> str:
     return f"{sec}s"
 
 
+def _safe_int(value: Any) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        return int(float(value))
+    except Exception:
+        return None
+
+
 def _get_nested(d: Dict[str, Any], path: str, default=None):
     """
     Read either nested dicts or flattened keys.
@@ -220,6 +229,14 @@ class UPSCog(commands.Cog):
         except Exception:
             live = {}
 
+        # Graph from recent log (also used as fallback for a few values)
+        recent_rows = self.log_store.get_recent(hours=window_hours)
+
+        # If we do not have enough points, automatically widen the window.
+        if len(recent_rows) < 2 and window_hours < 24:
+            recent_rows = self.log_store.get_recent(hours=24)
+            window_hours = 24
+
         # Pull values from either schema (new/old)
         status = _get_nested(live, "status", {}) or {}
 
@@ -227,13 +244,29 @@ class UPSCog(commands.Cog):
         batt_percent = _get_nested(live, "battery_percent", None)
         health = _get_nested(live, "health", None)
 
-        # time-to-empty: prefer new key, fallback to old formats if present
-        tte = _get_nested(live, "time_to_empty_seconds", None)
-        if tte is None:
-            # common alternates from older implementation
-            tte = _get_nested(live, "time_to_empty_s", None)
-        if tte is None:
-            tte = _get_nested(live, "time_to_empty", None)
+        # time-to-empty: support all known key variants
+        tte = None
+        for key in (
+            "time_to_empty_seconds",
+            "time_to_empty_s",
+            "time_to_empty",
+            "time to empty",
+            "status.time_to_empty_seconds",
+            "status.time_to_empty_s",
+            "status.time_to_empty",
+            "status.time to empty",
+        ):
+            tte = _safe_int(_get_nested(live, key, None))
+            if tte is not None:
+                break
+
+        # Fallback to latest log sample if live snapshot does not contain runtime
+        if tte is None and recent_rows:
+            last = recent_rows[-1]
+            for key in ("time_to_empty_seconds", "time_to_empty_s", "time_to_empty", "time to empty"):
+                tte = _safe_int(last.get(key))
+                if tte is not None:
+                    break
 
         # Input/output details
         in_v = _get_nested(live, "input_voltage", None)
@@ -244,17 +277,10 @@ class UPSCog(commands.Cog):
         out_v = _get_nested(live, "output.voltage", None)
         out_w = _get_nested(live, "output.power", None)
 
-        # Build “nice” summary (close to your original)
-        lines = [
-            "**UPS Status**",
-            f"Enabled: `{ups_cfg.get('enabled', True)}` | Poll: `{ups_cfg.get('poll_seconds', 30)}s`",
-        ]
-
         # Old status flags
         def _flag(key: str):
             return status.get(key) if isinstance(status, dict) else None
 
-        # Try both old-style keys and some common variants
         ac_present = _flag("ac present")
         charging = _flag("charging")
         discharging = _flag("discharging")
@@ -262,40 +288,44 @@ class UPSCog(commands.Cog):
         needs_replacement = _flag("needs replacement")
         shutdown_imminent = _flag("shutdown imminent")
 
+        color = discord.Color.orange() if on_battery else discord.Color.green()
+        embed = discord.Embed(
+            title="UPS Status",
+            description=f"Monitoring: `enabled={ups_cfg.get('enabled', True)}` | `poll={ups_cfg.get('poll_seconds', 30)}s`",
+            color=color,
+        )
+        embed.add_field(name="On Battery", value=f"`{on_battery}`", inline=True)
+        embed.add_field(name="Battery", value=f"`{batt_percent}%`" if batt_percent is not None else "`Unknown`", inline=True)
+        embed.add_field(name="Time To Empty", value=f"`{_fmt_seconds(tte)}`", inline=True)
+        embed.add_field(name="Health", value=f"`{health if health is not None else 'Unknown'}`", inline=True)
+        embed.add_field(
+            name="Input",
+            value=f"`V={in_v if in_v is not None else 'Unknown'} Hz={in_hz if in_hz is not None else 'Unknown'}`",
+            inline=True,
+        )
+        embed.add_field(
+            name="Output",
+            value=f"`V={out_v if out_v is not None else 'Unknown'} W={out_w if out_w is not None else 'Unknown'}`",
+            inline=True,
+        )
+
+        flags = []
         if ac_present is not None:
-            lines.append(f"AC present: `{ac_present}`")
-        lines.append(f"On battery: `{on_battery}`")
-
-        if charging is not None or discharging is not None:
-            lines.append(f"Charging: `{charging}` | Discharging: `{discharging}`")
-
+            flags.append(f"AC present=`{ac_present}`")
+        if charging is not None:
+            flags.append(f"Charging=`{charging}`")
+        if discharging is not None:
+            flags.append(f"Discharging=`{discharging}`")
         if fully_charged is not None:
-            lines.append(f"Fully charged: `{fully_charged}`")
+            flags.append(f"Fully charged=`{fully_charged}`")
         if needs_replacement is not None:
-            lines.append(f"Needs replacement: `{needs_replacement}`")
+            flags.append(f"Needs replacement=`{needs_replacement}`")
         if shutdown_imminent is not None:
-            lines.append(f"Shutdown imminent: `{shutdown_imminent}`")
+            flags.append(f"Shutdown imminent=`{shutdown_imminent}`")
+        if flags:
+            embed.add_field(name="Flags", value="\n".join(flags), inline=False)
 
-        if batt_percent is not None:
-            lines.append(f"Battery: `{batt_percent}%`")
-        lines.append(f"Health: `{health}`")
-        lines.append(f"Time to empty: `{_fmt_seconds(tte)}`")
-
-        # Input/output
-        if in_v is not None or in_hz is not None:
-            lines.append(f"Input: `V={in_v} Hz={in_hz}`")
-        if out_v is not None or out_w is not None:
-            lines.append(f"Output: `V={out_v} W={out_w}`")
-
-        summary = "\n".join(lines)
-
-        # Graph from recent log
-        recent_rows = self.log_store.get_recent(hours=window_hours)
-
-        # If we do not have enough points, automatically widen the window.
-        if len(recent_rows) < 2 and window_hours < 24:
-            recent_rows = self.log_store.get_recent(hours=24)
-            window_hours = 24
+        embed.set_footer(text=f"Window: last {window_hours}h | Timezone: {tz_name}")
 
         graph = build_ups_status_graph(
             recent_rows,
@@ -305,10 +335,12 @@ class UPSCog(commands.Cog):
 
         if graph:
             file = discord.File(graph, filename="ups_status.png")
-            await ctx.respond(content=summary, file=file, ephemeral=True)
+            await ctx.respond(file=file, embed=embed, ephemeral=True)
         else:
             await ctx.respond(
-                content=summary + "\n(No graph data available yet.)", ephemeral=True
+                embed=embed,
+                content="No graph data available yet.",
+                ephemeral=True,
             )
 
     def poll_for_event(self):

@@ -153,3 +153,26 @@ def set_ups_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     data["ups"] = ups
     write_cache_json(data)
     return ups
+
+
+# -----------------------------
+# Power action helpers
+# -----------------------------
+
+def get_power_restart_notice() -> Optional[Dict[str, Any]]:
+    data = read_cache_json()
+    notice = data.get("power_restart_notice")
+    return notice if isinstance(notice, dict) else None
+
+
+def set_power_restart_notice(notice: Dict[str, Any]) -> None:
+    data = read_cache_json()
+    data["power_restart_notice"] = notice
+    write_cache_json(data)
+
+
+def clear_power_restart_notice() -> None:
+    data = read_cache_json()
+    if "power_restart_notice" in data:
+        del data["power_restart_notice"]
+        write_cache_json(data)
