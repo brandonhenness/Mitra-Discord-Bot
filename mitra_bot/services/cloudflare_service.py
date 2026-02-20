@@ -17,8 +17,23 @@ class CloudflareService:
       - updating a DNS record
     """
 
-    def __init__(self, api_token: str) -> None:
-        self.api_token = api_token
+    def __init__(
+        self,
+        api_token: Optional[str] = None,
+        *,
+        api_key: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> None:
+        self.api_token = (api_token or "").strip()
+        self.api_key = (api_key or "").strip()
+        self.email = (email or "").strip()
+
+        has_token = bool(self.api_token)
+        has_key_auth = bool(self.api_key and self.email)
+        if not has_token and not has_key_auth:
+            raise ValueError(
+                "Cloudflare auth is missing. Provide api_token or api_key + email."
+            )
 
     # --------------------------------------------------
     # Internal helpers
@@ -26,10 +41,13 @@ class CloudflareService:
 
     @property
     def _headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.api_token}",
-            "Content-Type": "application/json",
-        }
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_token:
+            headers["Authorization"] = f"Bearer {self.api_token}"
+        else:
+            headers["X-Auth-Key"] = self.api_key
+            headers["X-Auth-Email"] = self.email
+        return headers
 
     def _request(
         self,

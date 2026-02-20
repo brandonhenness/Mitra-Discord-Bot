@@ -6,7 +6,18 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
+from mitra_bot.storage.cache_schema import normalize_cache_data
+
 CACHE_PATH = Path("cache.json")
+
+
+def _snowflake_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        return str(int(value))
+    except Exception:
+        return None
 
 
 def read_cache_json() -> Dict[str, Any]:
@@ -17,7 +28,12 @@ def read_cache_json() -> Dict[str, Any]:
 
 
 def write_cache_json(data: Dict[str, Any]) -> None:
-    CACHE_PATH.write_text(json.dumps(data), encoding="utf-8")
+    normalized = _sanitize_cache_for_write(data)
+    CACHE_PATH.write_text(json.dumps(normalized), encoding="utf-8")
+
+
+def _sanitize_cache_for_write(data: Dict[str, Any]) -> Dict[str, Any]:
+    return normalize_cache_data(data)
 
 
 def ensure_ups_config(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -146,6 +162,9 @@ def ensure_todo_config(data: Dict[str, Any]) -> Dict[str, Any]:
         rec.setdefault("category_id", None)
         rec.setdefault("hub_channel_id", None)
         rec.setdefault("hub_message_id", None)
+        for key in ("category_id", "hub_channel_id", "hub_message_id"):
+            sf = _snowflake_str(rec.get(key))
+            rec[key] = sf if sf is not None else None
         guilds[str(g)] = rec
 
     for ch, rec in list(lists.items()):
@@ -154,9 +173,37 @@ def ensure_todo_config(data: Dict[str, Any]) -> Dict[str, Any]:
         rec.setdefault("guild_id", None)
         rec.setdefault("board_message_id", None)
         rec.setdefault("tasks", [])
+        rec_guild = _snowflake_str(rec.get("guild_id"))
+        rec["guild_id"] = rec_guild if rec_guild is not None else None
+        rec_board = _snowflake_str(rec.get("board_message_id"))
+        rec["board_message_id"] = rec_board if rec_board is not None else None
         if not isinstance(rec.get("tasks"), list):
             rec["tasks"] = []
+        for row in rec["tasks"]:
+            if isinstance(row, dict):
+                thread_sf = _snowflake_str(row.get("thread_id"))
+                row["thread_id"] = thread_sf if thread_sf is not None else None
+                created_by_sf = _snowflake_str(row.get("created_by"))
+                if created_by_sf is not None:
+                    row["created_by"] = created_by_sf
+                assignee_sf = _snowflake_str(row.get("assignee_id"))
+                row["assignee_id"] = assignee_sf if assignee_sf is not None else None
+                assignees = row.get("assignee_ids", [])
+                if isinstance(assignees, list):
+                    row["assignee_ids"] = [
+                        sf for sf in (_snowflake_str(x) for x in assignees) if sf is not None
+                    ]
         lists[str(ch)] = rec
+
+    # Auto-heal list guild pointers if cache only has one known guild.
+    if len(guilds) == 1:
+        only_guild_id = next(iter(guilds.keys()))
+        for rec in lists.values():
+            if not isinstance(rec, dict):
+                continue
+            rec_guild_id = _snowflake_str(rec.get("guild_id"))
+            if rec_guild_id is None or rec_guild_id not in guilds:
+                rec["guild_id"] = only_guild_id
 
     todo_cfg["guilds"] = guilds
     todo_cfg["lists"] = lists
@@ -169,6 +216,49 @@ def ensure_todo_config(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def ensure_cloudflare_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    cloudflare = data.get("cloudflare")
+    if not isinstance(cloudflare, dict):
+        cloudflare = {}
+
+    # Migrate from legacy top-level keys.
+    for key in ("api_token", "api_key", "email", "zone_id", "record_ids", "enabled"):
+        if key not in cloudflare and key in data:
+            cloudflare[key] = data.get(key)
+
+    # Normalize record_ids to a list of string ids.
+    raw_record_ids = cloudflare.get("record_ids", [])
+    if isinstance(raw_record_ids, list):
+        cloudflare["record_ids"] = [str(x) for x in raw_record_ids if x is not None]
+    else:
+        cloudflare["record_ids"] = []
+
+    data["cloudflare"] = cloudflare
+    return data
+
+
+def ensure_notifications_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    notifications = data.get("notifications")
+    if not isinstance(notifications, dict):
+        notifications = {}
+
+    guild_channels = notifications.get("guild_channels")
+    if not isinstance(guild_channels, dict):
+        guild_channels = {}
+
+    normalized: Dict[str, str] = {}
+    for raw_guild_id, raw_channel_id in guild_channels.items():
+        guild_id = _snowflake_str(raw_guild_id)
+        channel_id = _snowflake_str(raw_channel_id)
+        if guild_id is None or channel_id is None:
+            continue
+        normalized[guild_id] = channel_id
+
+    notifications["guild_channels"] = normalized
+    data["notifications"] = notifications
+    return data
+
+
 def read_cache_with_defaults() -> Dict[str, Any]:
     """
     Load cache.json and apply schema defaults/migrations. Writes back if updated.
@@ -176,8 +266,7 @@ def read_cache_with_defaults() -> Dict[str, Any]:
     data = read_cache_json()
     before = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
-    data = ensure_ups_config(data)
-    data = ensure_todo_config(data)
+    data = normalize_cache_data(data)
 
     after = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     if after != before:
@@ -270,6 +359,76 @@ def set_ups_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     data["ups"] = ups
     write_cache_json(data)
     return ups
+
+
+def get_cloudflare_config() -> Dict[str, Any]:
+    data = read_cache_with_defaults()
+    cfg = data.get("cloudflare", {})
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def get_notification_channel_id_for_guild(guild_id: int) -> Optional[int]:
+    data = read_cache_with_defaults()
+    notifications = data.get("notifications", {})
+    if not isinstance(notifications, dict):
+        notifications = {}
+    guild_channels = notifications.get("guild_channels", {})
+    if not isinstance(guild_channels, dict):
+        guild_channels = {}
+
+    raw = guild_channels.get(str(guild_id))
+    try:
+        return int(raw) if raw is not None else None
+    except Exception:
+        return None
+
+
+def set_notification_channel_id_for_guild(guild_id: int, channel_id: int) -> None:
+    data = read_cache_with_defaults()
+    notifications = data.get("notifications", {})
+    if not isinstance(notifications, dict):
+        notifications = {}
+    guild_channels = notifications.get("guild_channels", {})
+    if not isinstance(guild_channels, dict):
+        guild_channels = {}
+
+    guild_channels[str(int(guild_id))] = str(int(channel_id))
+    notifications["guild_channels"] = guild_channels
+    data["notifications"] = notifications
+    write_cache_json(data)
+
+
+def clear_notification_channel_id_for_guild(guild_id: int) -> None:
+    data = read_cache_with_defaults()
+    notifications = data.get("notifications", {})
+    if not isinstance(notifications, dict):
+        notifications = {}
+    guild_channels = notifications.get("guild_channels", {})
+    if not isinstance(guild_channels, dict):
+        guild_channels = {}
+
+    guild_channels.pop(str(int(guild_id)), None)
+    notifications["guild_channels"] = guild_channels
+    data["notifications"] = notifications
+    write_cache_json(data)
+
+
+def get_notification_channel_map() -> Dict[int, int]:
+    data = read_cache_with_defaults()
+    notifications = data.get("notifications", {})
+    if not isinstance(notifications, dict):
+        return {}
+    guild_channels = notifications.get("guild_channels", {})
+    if not isinstance(guild_channels, dict):
+        return {}
+
+    out: Dict[int, int] = {}
+    for raw_guild_id, raw_channel_id in guild_channels.items():
+        try:
+            out[int(raw_guild_id)] = int(raw_channel_id)
+        except Exception:
+            continue
+    return out
 
 
 # -----------------------------
@@ -382,7 +541,7 @@ def set_todo_category_id_for_guild(guild_id: int, category_id: int) -> None:
     data = read_cache_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
-    rec["category_id"] = int(category_id)
+    rec["category_id"] = str(int(category_id))
     data["todo_config"] = cfg
     write_cache_json(data)
 
@@ -412,9 +571,9 @@ def set_todo_list_board_message_id(list_channel_id: int, message_id: int, *, gui
     data = read_cache_json()
     cfg = _todo_cfg(data)
     rec = _ensure_list_rec(cfg, list_channel_id)
-    rec["board_message_id"] = int(message_id)
+    rec["board_message_id"] = str(int(message_id))
     if guild_id is not None:
-        rec["guild_id"] = int(guild_id)
+        rec["guild_id"] = str(int(guild_id))
     data["todo_config"] = cfg
     write_cache_json(data)
 
@@ -433,7 +592,7 @@ def set_todo_tasks_for_list_channel(list_channel_id: int, items: list[Dict[str, 
     rec = _ensure_list_rec(cfg, list_channel_id)
     rec["tasks"] = items
     if guild_id is not None:
-        rec["guild_id"] = int(guild_id)
+        rec["guild_id"] = str(int(guild_id))
     data["todo_config"] = cfg
     write_cache_json(data)
 
@@ -463,7 +622,7 @@ def set_todo_hub_channel_id_for_guild(guild_id: int, channel_id: int) -> None:
     data = read_cache_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
-    rec["hub_channel_id"] = int(channel_id)
+    rec["hub_channel_id"] = str(int(channel_id))
     data["todo_config"] = cfg
     write_cache_json(data)
 
@@ -483,7 +642,7 @@ def set_todo_hub_message_id_for_guild(guild_id: int, message_id: int) -> None:
     data = read_cache_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
-    rec["hub_message_id"] = int(message_id)
+    rec["hub_message_id"] = str(int(message_id))
     data["todo_config"] = cfg
     write_cache_json(data)
 
@@ -526,7 +685,7 @@ def get_todo_list_channel_ids_for_guild(guild_id: int) -> list[int]:
     lists = cfg.get("lists", {})
     if not isinstance(lists, dict):
         return []
-    ids: List[int] = []
+    ids: list[int] = []
     for raw_id, rec in lists.items():
         if not isinstance(rec, dict):
             continue

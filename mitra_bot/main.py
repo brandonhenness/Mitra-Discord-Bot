@@ -10,6 +10,7 @@ from mitra_bot.discord_app.bot_factory import AppState, create_bot
 from mitra_bot.logging_setup import setup_logging
 from mitra_bot.storage.cache_store import (
     clear_power_restart_notice,
+    get_notification_channel_map,
     get_power_restart_notice,
 )
 from mitra_bot.settings import load_settings
@@ -127,11 +128,20 @@ async def main_async() -> None:
                     logging.exception("Failed to edit restart confirmation message after boot.")
             clear_power_restart_notice()
 
-        if settings.channel_id:
-            logging.info("Configured notify channel id: %s", settings.channel_id)
+        per_guild_notify = get_notification_channel_map()
+        if per_guild_notify:
+            rendered = ", ".join(
+                f"{gid}->{cid}" for gid, cid in sorted(per_guild_notify.items())
+            )
+            logging.info("Configured notify channels per guild: %s", rendered)
+        elif settings.channel_id:
+            logging.info(
+                "Configured legacy notify channel id: %s (from channel/channel_id)",
+                settings.channel_id,
+            )
         else:
             logging.info(
-                "No notify channel configured in cache.json (channel/channel_id)."
+                "No notify channels configured. Use /settings notification_channel_set."
             )
 
         logging.info("To-Do lists are managed via per-guild To-Do category and list channels.")

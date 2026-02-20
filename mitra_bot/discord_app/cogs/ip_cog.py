@@ -9,7 +9,10 @@ from discord.ext import commands
 from mitra_bot.services.ip_service import get_public_ip
 from mitra_bot.services.notifier import Notifier
 from mitra_bot.services.role_manager import ensure_role
-from mitra_bot.storage.cache_store import save_ip
+from mitra_bot.storage.cache_store import (
+    get_notification_channel_id_for_guild,
+    save_ip,
+)
 
 
 def _format_ip_message(ip: str, *, is_change: bool) -> str:
@@ -92,11 +95,15 @@ class IPCog(commands.Cog):
 
         notifier = Notifier(self.bot)
 
-        # Try to resolve subscriber role from any guild
-        mention_prefix = ""
+        sent = 0
         for guild in self.bot.guilds:
+            per_guild_channel_id = get_notification_channel_id_for_guild(guild.id)
+            if not per_guild_channel_id:
+                continue
+
             role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
             role = discord.utils.get(guild.roles, name=role_name)
+            mention_prefix = ""
             if role:
                 # Ensure it is mentionable (safe even if already true)
                 if not role.mentionable:
@@ -109,8 +116,28 @@ class IPCog(commands.Cog):
                         logging.debug("Could not set role to mentionable.")
 
                 mention_prefix = f"{role.mention}\n"
-                break
 
-        await notifier.send_to_channel(channel_id, mention_prefix + msg_body)
+            await notifier.send_to_channel(per_guild_channel_id, mention_prefix + msg_body)
+            sent += 1
+
+        if sent == 0:
+            # Backward compatibility for older single-channel config.
+            mention_prefix = ""
+            for guild in self.bot.guilds:
+                role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
+                role = discord.utils.get(guild.roles, name=role_name)
+                if role:
+                    if not role.mentionable:
+                        try:
+                            await role.edit(
+                                mentionable=True,
+                                reason="Mitra bot needs to mention this role",
+                            )
+                        except Exception:
+                            logging.debug("Could not set role to mentionable.")
+                    mention_prefix = f"{role.mention}\n"
+                    break
+
+            await notifier.send_to_channel(channel_id, mention_prefix + msg_body)
 
         await save_ip(new_ip)
