@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional
 
+from pydantic import BaseModel, ConfigDict, model_validator
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -20,35 +22,45 @@ def _parse_ts(ts: str) -> Optional[datetime]:
         return None
 
 
+class UPSLogRowModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    ts: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, value: Any) -> Dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("UPS log row must be an object.")
+
+        row = dict(value)
+        ts = row.get("ts")
+        if not ts:
+            ts = row.get("timestamp") or row.get("time") or row.get("datetime")
+
+        if isinstance(ts, datetime):
+            ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        if not isinstance(ts, str) or not ts.strip():
+            raise ValueError("UPS log row is missing timestamp.")
+
+        row["ts"] = ts.strip()
+
+        if "time_to_empty" in row and "time_to_empty_seconds" not in row:
+            try:
+                row["time_to_empty_seconds"] = int(row["time_to_empty"])
+            except Exception:
+                pass
+
+        return row
+
+
 def _normalize_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Ensure the row has a standard 'ts' field (ISO UTC string).
-    Also tolerates old key names (timestamp/time).
-    """
-    if not isinstance(row, dict):
+    try:
+        model = UPSLogRowModel.model_validate(row)
+    except Exception:
         return None
-
-    # Normalize timestamp key
-    ts = row.get("ts")
-    if not ts:
-        ts = row.get("timestamp") or row.get("time") or row.get("datetime")
-
-    if isinstance(ts, datetime):
-        ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-    if not isinstance(ts, str) or not ts.strip():
-        return None
-
-    row["ts"] = ts.strip()
-
-    # Optional: normalize common alternate metric keys if your old file used different names
-    if "time_to_empty" in row and "time_to_empty_seconds" not in row:
-        try:
-            row["time_to_empty_seconds"] = int(row["time_to_empty"])
-        except Exception:
-            pass
-
-    return row
+    return model.model_dump(mode="json")
 
 
 class UPSLogStore:

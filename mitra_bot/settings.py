@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Optional
 
+from mitra_bot.models.settings_models import AppSettingsModel
 from mitra_bot.storage.cache_store import read_cache_with_defaults, write_cache_json
 
 
@@ -39,39 +40,6 @@ class AppSettings:
     ip_subscriber_role_name: str
 
 
-def _coerce_int(value: Any, default: int) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
-def _coerce_bool(value: Any, default: bool) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return default
-
-
-def _coerce_channel_id(cfg: Dict[str, Any]) -> Optional[int]:
-    raw = cfg.get("channel_id")
-    if raw is None:
-        raw = cfg.get("channel")
-
-    if raw is None:
-        return None
-
-    try:
-        return int(raw)
-    except Exception:
-        return None
-
-
 def load_settings(*, interactive_token: bool = True) -> AppSettings:
     """
     Load settings from cache.json + env overrides.
@@ -90,44 +58,28 @@ def load_settings(*, interactive_token: bool = True) -> AppSettings:
     if not token:
         raise RuntimeError("Discord token is missing (cache.json or env var).")
 
-    ip_poll_seconds = _coerce_int(cfg.get("ip_poll_seconds", 900), 900)
+    parsed = AppSettingsModel.model_validate(cfg)
 
-    ups_cfg = cfg.get("ups", {}) if isinstance(cfg.get("ups"), dict) else {}
     ups = UPSSettings(
-        enabled=_coerce_bool(ups_cfg.get("enabled", True), True),
-        poll_seconds=_coerce_int(ups_cfg.get("poll_seconds", 30), 30),
-        warn_time_to_empty_seconds=_coerce_int(
-            ups_cfg.get("warn_time_to_empty_seconds", 600), 600
-        ),
-        critical_time_to_empty_seconds=_coerce_int(
-            ups_cfg.get("critical_time_to_empty_seconds", 180), 180
-        ),
-        auto_shutdown_enabled=_coerce_bool(
-            ups_cfg.get("auto_shutdown_enabled", False), False
-        ),
-        auto_shutdown_action=str(ups_cfg.get("auto_shutdown_action", "shutdown")),
-        auto_shutdown_delay_seconds=_coerce_int(
-            ups_cfg.get("auto_shutdown_delay_seconds", 0), 0
-        ),
-        auto_shutdown_force=_coerce_bool(
-            ups_cfg.get("auto_shutdown_force", False), False
-        ),
-        log_enabled=_coerce_bool(ups_cfg.get("log_enabled", True), True),
-        log_file=str(ups_cfg.get("log_file", "ups_stats.jsonl")),
-        graph_default_hours=_coerce_int(ups_cfg.get("graph_default_hours", 6), 6),
-        timezone=str(ups_cfg.get("timezone", "UTC")),
-    )
-
-    admin_role_name = str(cfg.get("admin_role_name", "Mitra Admin"))
-    ip_subscriber_role_name = str(
-        cfg.get("ip_subscriber_role_name", "Mitra IP Subscriber")
+        enabled=parsed.ups.enabled,
+        poll_seconds=parsed.ups.poll_seconds,
+        warn_time_to_empty_seconds=parsed.ups.warn_time_to_empty_seconds,
+        critical_time_to_empty_seconds=parsed.ups.critical_time_to_empty_seconds,
+        auto_shutdown_enabled=parsed.ups.auto_shutdown_enabled,
+        auto_shutdown_action=parsed.ups.auto_shutdown_action,
+        auto_shutdown_delay_seconds=parsed.ups.auto_shutdown_delay_seconds,
+        auto_shutdown_force=parsed.ups.auto_shutdown_force,
+        log_enabled=parsed.ups.log_enabled,
+        log_file=parsed.ups.log_file,
+        graph_default_hours=parsed.ups.graph_default_hours,
+        timezone=parsed.ups.timezone,
     )
 
     return AppSettings(
         token=token,
-        channel_id=_coerce_channel_id(cfg),
-        ip_poll_seconds=ip_poll_seconds,
+        channel_id=parsed.resolved_channel_id,
+        ip_poll_seconds=parsed.ip_poll_seconds,
         ups=ups,
-        admin_role_name=admin_role_name,
-        ip_subscriber_role_name=ip_subscriber_role_name,
+        admin_role_name=parsed.admin_role_name,
+        ip_subscriber_role_name=parsed.ip_subscriber_role_name,
     )

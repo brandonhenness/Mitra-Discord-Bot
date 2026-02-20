@@ -31,6 +31,77 @@ class UPSConfigModel(BaseModel):
     timezone: str = "UTC"
 
 
+class UPSConfigPatchModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Optional[bool] = None
+    poll_seconds: Optional[int] = None
+    warn_time_to_empty_seconds: Optional[int] = None
+    critical_time_to_empty_seconds: Optional[int] = None
+    auto_shutdown_enabled: Optional[bool] = None
+    auto_shutdown_action: Optional[str] = None
+    auto_shutdown_delay_seconds: Optional[int] = None
+    auto_shutdown_force: Optional[bool] = None
+    log_enabled: Optional[bool] = None
+    log_file: Optional[str] = None
+    graph_default_hours: Optional[int] = None
+    timezone: Optional[str] = None
+
+
+class NotificationsPatchModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    guild_channels: Optional[Dict[str, str]] = None
+
+    @field_validator("guild_channels", mode="before")
+    @classmethod
+    def _normalize_guild_channels(cls, value: Any) -> Optional[Dict[str, str]]:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            return {}
+        out: Dict[str, str] = {}
+        for raw_guild_id, raw_channel_id in value.items():
+            guild_id = _snowflake_str(raw_guild_id)
+            channel_id = _snowflake_str(raw_channel_id)
+            if guild_id is None or channel_id is None:
+                continue
+            out[guild_id] = channel_id
+        return out
+
+
+class CloudflarePatchModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_token: Optional[str] = None
+    api_key: Optional[str] = None
+    email: Optional[str] = None
+    zone_id: Optional[str] = None
+    record_ids: Optional[list[str]] = None
+    enabled: Optional[bool] = None
+
+    @field_validator("api_token", "api_key", "email", "zone_id", mode="before")
+    @classmethod
+    def _coerce_optional_str(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        return str(value)
+
+    @field_validator("record_ids", mode="before")
+    @classmethod
+    def _normalize_record_ids(cls, value: Any) -> Optional[list[str]]:
+        if value is None:
+            return None
+        if not isinstance(value, list):
+            return []
+        out: list[str] = []
+        for raw in value:
+            if raw is None:
+                continue
+            out.append(str(raw))
+        return out
+
+
 class TodoTaskModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -252,6 +323,76 @@ class PowerRestartNoticeModel(BaseModel):
         return _snowflake_str(value)
 
 
+class RestartNoticeRuntimeModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    channel_id: Optional[int] = None
+    message_id: Optional[int] = None
+    delay_seconds: int = 0
+    force: bool = False
+    requested_by_user_id: Optional[int] = None
+    confirmed_by_user_id: Optional[int] = None
+    requested_at_epoch: Optional[int] = None
+    confirmed_at_epoch: Optional[int] = None
+
+    @field_validator("channel_id", "message_id", "requested_by_user_id", "confirmed_by_user_id", mode="before")
+    @classmethod
+    def _to_int_optional(cls, value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    @field_validator("delay_seconds", mode="before")
+    @classmethod
+    def _to_int_default_zero(cls, value: Any) -> int:
+        if value is None:
+            return 0
+        try:
+            return int(value)
+        except Exception:
+            return 0
+
+    @field_validator("requested_at_epoch", "confirmed_at_epoch", mode="before")
+    @classmethod
+    def _to_int_optional_epoch(cls, value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+
+class PowerRestartNoticePatchModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Optional[str] = None
+    channel_id: Optional[str] = None
+    guild_id: Optional[str] = None
+    message_id: Optional[str] = None
+    requested_by_user_id: Optional[str] = None
+    requested_at_epoch: Optional[int] = None
+    confirmed_by_user_id: Optional[str] = None
+    confirmed_at_epoch: Optional[int] = None
+    delay_seconds: Optional[int] = None
+    force: Optional[bool] = None
+
+    @field_validator(
+        "channel_id",
+        "guild_id",
+        "message_id",
+        "requested_by_user_id",
+        "confirmed_by_user_id",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_snowflake_fields(cls, value: Any) -> Optional[str]:
+        return _snowflake_str(value)
+
+
 class CacheModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -287,3 +428,29 @@ class CacheModel(BaseModel):
 def normalize_cache_data(data: Dict[str, Any]) -> Dict[str, Any]:
     model = CacheModel.model_validate(data if isinstance(data, dict) else {})
     return model.model_dump(mode="json", exclude_none=False)
+
+
+def normalize_ups_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
+    model = UPSConfigPatchModel.model_validate(patch if isinstance(patch, dict) else {})
+    return model.model_dump(mode="json", exclude_none=True)
+
+
+def normalize_notifications_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
+    model = NotificationsPatchModel.model_validate(
+        patch if isinstance(patch, dict) else {}
+    )
+    return model.model_dump(mode="json", exclude_none=True)
+
+
+def normalize_cloudflare_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
+    model = CloudflarePatchModel.model_validate(
+        patch if isinstance(patch, dict) else {}
+    )
+    return model.model_dump(mode="json", exclude_none=True)
+
+
+def normalize_power_restart_notice_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
+    model = PowerRestartNoticePatchModel.model_validate(
+        patch if isinstance(patch, dict) else {}
+    )
+    return model.model_dump(mode="json", exclude_none=True)

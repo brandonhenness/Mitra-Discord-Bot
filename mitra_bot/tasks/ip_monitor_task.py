@@ -8,10 +8,35 @@ from typing import Optional
 
 import discord
 from discord.ext import tasks
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mitra_bot.services.cloudflare_service import CloudflareService
 from mitra_bot.services.ip_service import get_public_ip
 from mitra_bot.storage.cache_store import get_cloudflare_config, load_ip
+
+
+class CloudflareDNSUpdateConfig(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    enabled: bool = True
+    zone_id: str = ""
+    record_ids: list[str] = Field(default_factory=list)
+    api_token: str = ""
+    api_key: str = ""
+    email: str = ""
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "CloudflareDNSUpdateConfig":
+        self.zone_id = self.zone_id.strip()
+        self.record_ids = [str(x).strip() for x in self.record_ids if str(x).strip()]
+        self.api_token = self.api_token.strip()
+        self.api_key = self.api_key.strip()
+        self.email = self.email.strip()
+        return self
+
+    @property
+    def has_auth(self) -> bool:
+        return bool(self.api_token) or bool(self.api_key and self.email)
 
 
 class IPMonitorTask:
@@ -39,34 +64,24 @@ class IPMonitorTask:
         self.loop.start()
 
     async def _update_cloudflare_dns(self, ip: str) -> None:
-        cfg = get_cloudflare_config()
-        if not cfg:
+        raw_cfg = get_cloudflare_config()
+        if not raw_cfg:
             return
+        cfg = CloudflareDNSUpdateConfig.model_validate(raw_cfg)
 
-        enabled = bool(cfg.get("enabled", True))
-        if not enabled:
+        if not cfg.enabled:
             logging.info("Cloudflare DNS update is disabled in cache config.")
             return
 
-        zone_id = str(cfg.get("zone_id", "")).strip()
-        if not zone_id:
+        if not cfg.zone_id:
             logging.warning("Cloudflare config is missing zone_id; skipping DNS update.")
             return
 
-        raw_ids = cfg.get("record_ids", [])
-        if not isinstance(raw_ids, list) or not raw_ids:
+        if not cfg.record_ids:
             logging.warning("Cloudflare config has no record_ids; skipping DNS update.")
             return
-        record_ids = [str(x).strip() for x in raw_ids if str(x).strip()]
-        if not record_ids:
-            logging.warning("Cloudflare config record_ids are empty; skipping DNS update.")
-            return
 
-        api_token = str(cfg.get("api_token", "")).strip()
-        api_key = str(cfg.get("api_key", "")).strip()
-        email = str(cfg.get("email", "")).strip()
-
-        if not api_token and not (api_key and email):
+        if not cfg.has_auth:
             logging.warning(
                 "Cloudflare config needs api_token or api_key+email; skipping DNS update."
             )
@@ -75,15 +90,15 @@ class IPMonitorTask:
         ip_version = ipaddress.ip_address(ip).version
 
         service = CloudflareService(
-            api_token=api_token or None,
-            api_key=api_key or None,
-            email=email or None,
+            api_token=cfg.api_token or None,
+            api_key=cfg.api_key or None,
+            email=cfg.email or None,
         )
-        records = await asyncio.to_thread(service.get_dns_records, zone_id)
+        records = await asyncio.to_thread(service.get_dns_records, cfg.zone_id)
         records_by_id = {str(r.get("id", "")): r for r in records}
 
         updated = 0
-        for record_id in record_ids:
+        for record_id in cfg.record_ids:
             record = records_by_id.get(record_id)
             if not record:
                 logging.warning("Cloudflare record_id not found in zone: %s", record_id)
@@ -122,7 +137,7 @@ class IPMonitorTask:
             proxied = bool(record.get("proxied", False))
             await asyncio.to_thread(
                 service.update_dns_record,
-                zone_id,
+                cfg.zone_id,
                 record_id,
                 name=record_name,
                 record_type=record_type,

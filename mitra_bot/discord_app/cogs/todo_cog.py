@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import logging
 from typing import Dict, List, Optional, Tuple
 
 import discord
 from discord.ext import commands
+from mitra_bot.discord_app.cogs.todo_common import (
+    TodoItem,
+    assignee_mentions as _assignee_mentions,
+    build_task_embed as _build_task_embed,
+    clamp as _clamp,
+    now_iso as _now_iso,
+    status_emoji as _status_emoji,
+    status_label as _status_label,
+    to_item as _to_item,
+    to_raw as _to_raw,
+)
 
 from mitra_bot.storage.cache_store import (
     clear_todo_hub_message_id_for_guild,
@@ -26,113 +35,6 @@ from mitra_bot.storage.cache_store import (
     set_todo_list_board_message_id,
     set_todo_tasks_for_list_channel,
 )
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _clamp(text: str, n: int) -> str:
-    return text if len(text) <= n else text[: n - 1] + "..."
-
-
-def _status_emoji(status: str) -> str:
-    if status == "in_progress":
-        return "🟡"
-    if status == "done":
-        return "✅"
-    return "⬜"
-
-
-def _status_label(status: str) -> str:
-    if status == "in_progress":
-        return "In Progress"
-    if status == "done":
-        return "Done"
-    return "Open"
-
-
-@dataclass
-class TodoItem:
-    id: int
-    title: str
-    notes: str
-    status: str
-    assignee_ids: List[int]
-    thread_id: Optional[int]
-    created_by: int
-    created_at: str
-
-
-def _to_item(raw: dict) -> TodoItem:
-    status = raw.get("status")
-    if not isinstance(status, str):
-        status = "done" if bool(raw.get("done", False)) else "open"
-    if status not in {"open", "in_progress", "done"}:
-        status = "open"
-
-    assignee_ids: List[int] = []
-    raw_assignees = raw.get("assignee_ids")
-    if isinstance(raw_assignees, list):
-        for x in raw_assignees:
-            try:
-                assignee_ids.append(int(x))
-            except Exception:
-                pass
-    elif raw.get("assignee_id") is not None:
-        try:
-            assignee_ids = [int(raw.get("assignee_id"))]
-        except Exception:
-            assignee_ids = []
-
-    return TodoItem(
-        id=int(raw.get("id", 0)),
-        title=str(raw.get("title", "Untitled")),
-        notes=str(raw.get("notes", "")),
-        status=status,
-        assignee_ids=assignee_ids,
-        thread_id=int(raw["thread_id"]) if raw.get("thread_id") is not None else None,
-        created_by=int(raw.get("created_by", 0)),
-        created_at=str(raw.get("created_at", "")),
-    )
-
-
-def _to_raw(item: TodoItem) -> dict:
-    return {
-        "id": item.id,
-        "title": item.title,
-        "notes": item.notes,
-        "status": item.status,
-        "done": item.status == "done",
-        "assignee_ids": item.assignee_ids,
-        "assignee_id": item.assignee_ids[0] if item.assignee_ids else None,
-        "thread_id": item.thread_id,
-        "created_by": item.created_by,
-        "created_at": item.created_at,
-    }
-
-
-def _assignee_mentions(item: TodoItem) -> str:
-    if not item.assignee_ids:
-        return "_Unassigned_"
-    return ", ".join(f"<@{uid}>" for uid in item.assignee_ids)
-
-
-def _build_task_embed(item: TodoItem) -> discord.Embed:
-    embed = discord.Embed(
-        title=f"Task #{item.id}: {item.title}",
-        color=discord.Color.blurple(),
-        description=item.notes or "_No notes_",
-    )
-    embed.add_field(
-        name="Status",
-        value=f"{_status_emoji(item.status)} {_status_label(item.status)}",
-        inline=True,
-    )
-    embed.add_field(name="Assignees", value=_assignee_mentions(item), inline=True)
-    embed.add_field(name="Created By", value=f"<@{item.created_by}>", inline=True)
-    embed.add_field(name="Created At", value=item.created_at, inline=False)
-    return embed
 
 
 class ThreadEditTaskModal(discord.ui.Modal):

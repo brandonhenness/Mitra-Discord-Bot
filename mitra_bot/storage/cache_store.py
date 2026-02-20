@@ -6,264 +6,32 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
-from mitra_bot.storage.cache_schema import normalize_cache_data
+from mitra_bot.storage.cache_repository import CacheRepository
+from mitra_bot.storage.cache_schema import (
+    normalize_cache_data,
+    normalize_cloudflare_patch,
+    normalize_notifications_patch,
+    normalize_power_restart_notice_patch,
+    normalize_ups_patch,
+)
 
 CACHE_PATH = Path("cache.json")
-
-
-def _snowflake_str(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    try:
-        return str(int(value))
-    except Exception:
-        return None
+_CACHE_REPO = CacheRepository(CACHE_PATH, normalize_cache_data)
 
 
 def read_cache_json() -> Dict[str, Any]:
-    try:
-        return json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return _CACHE_REPO.read_raw()
 
 
 def write_cache_json(data: Dict[str, Any]) -> None:
-    normalized = _sanitize_cache_for_write(data)
-    CACHE_PATH.write_text(json.dumps(normalized), encoding="utf-8")
-
-
-def _sanitize_cache_for_write(data: Dict[str, Any]) -> Dict[str, Any]:
-    return normalize_cache_data(data)
-
-
-def ensure_ups_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Mirrors the defaults from bot.py so behavior does not change.
-    """
-    ups = data.get("ups")
-    if not isinstance(ups, dict):
-        ups = {}
-
-    ups.setdefault("enabled", True)
-    ups.setdefault("poll_seconds", 30)
-
-    # Alert thresholds (seconds remaining)
-    ups.setdefault("warn_time_to_empty_seconds", 600)      # 10 minutes
-    ups.setdefault("critical_time_to_empty_seconds", 180)  # 3 minutes
-
-    # Optional automatic shutdown control (OFF by default)
-    ups.setdefault("auto_shutdown_enabled", False)
-    ups.setdefault("auto_shutdown_action", "shutdown")     # shutdown or restart
-    ups.setdefault("auto_shutdown_delay_seconds", 0)
-    ups.setdefault("auto_shutdown_force", False)
-
-    # Logging
-    ups.setdefault("log_enabled", True)
-    ups.setdefault("log_file", "ups_stats.jsonl")
-    ups.setdefault("graph_default_hours", 6)               # /ups status default window
-
-    # Timezone for timestamps in logs and graphs (default: UTC)
-    ups.setdefault("timezone", "UTC")  # e.g. "America/Los_Angeles"
-
-    data["ups"] = ups
-    return data
-
-
-def ensure_todo_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    todo_cfg = data.get("todo_config")
-    if not isinstance(todo_cfg, dict):
-        todo_cfg = {}
-
-    # New simplified schema:
-    # todo_config = {
-    #   "guilds": {
-    #     "<guild_id>": {
-    #       "category_id": int|None,
-    #       "hub_channel_id": int|None,
-    #       "hub_message_id": int|None
-    #     }
-    #   },
-    #   "lists": {
-    #     "<list_channel_id>": {
-    #       "guild_id": int,
-    #       "board_message_id": int|None,
-    #       "tasks": [ ... ]
-    #     }
-    #   }
-    # }
-    guilds = todo_cfg.get("guilds")
-    if not isinstance(guilds, dict):
-        guilds = {}
-    lists = todo_cfg.get("lists")
-    if not isinstance(lists, dict):
-        lists = {}
-
-    # Migrate old keys if present.
-    old_categories = todo_cfg.get("categories", {})
-    old_hubs = todo_cfg.get("hubs", {})
-    old_hub_messages = todo_cfg.get("hub_messages", {})
-    old_board_messages = todo_cfg.get("board_messages", {})
-    old_tasks = todo_cfg.get("tasks", {})
-
-    if isinstance(old_categories, dict):
-        for g, cat_id in old_categories.items():
-            rec = guilds.get(str(g), {})
-            if not isinstance(rec, dict):
-                rec = {}
-            rec.setdefault("category_id", cat_id)
-            rec.setdefault("hub_channel_id", None)
-            rec.setdefault("hub_message_id", None)
-            guilds[str(g)] = rec
-
-    if isinstance(old_hubs, dict):
-        for g, hub_id in old_hubs.items():
-            rec = guilds.get(str(g), {})
-            if not isinstance(rec, dict):
-                rec = {}
-            rec.setdefault("category_id", None)
-            rec["hub_channel_id"] = hub_id
-            rec.setdefault("hub_message_id", None)
-            guilds[str(g)] = rec
-
-    if isinstance(old_hub_messages, dict):
-        for g, msg_id in old_hub_messages.items():
-            rec = guilds.get(str(g), {})
-            if not isinstance(rec, dict):
-                rec = {}
-            rec.setdefault("category_id", None)
-            rec.setdefault("hub_channel_id", None)
-            rec["hub_message_id"] = msg_id
-            guilds[str(g)] = rec
-
-    if isinstance(old_board_messages, dict):
-        for ch, msg_id in old_board_messages.items():
-            rec = lists.get(str(ch), {})
-            if not isinstance(rec, dict):
-                rec = {}
-            rec.setdefault("guild_id", None)
-            rec["board_message_id"] = msg_id
-            rec.setdefault("tasks", [])
-            lists[str(ch)] = rec
-
-    if isinstance(old_tasks, dict):
-        for ch, rows in old_tasks.items():
-            rec = lists.get(str(ch), {})
-            if not isinstance(rec, dict):
-                rec = {}
-            rec.setdefault("guild_id", None)
-            rec.setdefault("board_message_id", None)
-            rec["tasks"] = rows if isinstance(rows, list) else []
-            lists[str(ch)] = rec
-
-    # Clean/normalize records.
-    for g, rec in list(guilds.items()):
-        if not isinstance(rec, dict):
-            rec = {}
-        rec.setdefault("category_id", None)
-        rec.setdefault("hub_channel_id", None)
-        rec.setdefault("hub_message_id", None)
-        for key in ("category_id", "hub_channel_id", "hub_message_id"):
-            sf = _snowflake_str(rec.get(key))
-            rec[key] = sf if sf is not None else None
-        guilds[str(g)] = rec
-
-    for ch, rec in list(lists.items()):
-        if not isinstance(rec, dict):
-            rec = {}
-        rec.setdefault("guild_id", None)
-        rec.setdefault("board_message_id", None)
-        rec.setdefault("tasks", [])
-        rec_guild = _snowflake_str(rec.get("guild_id"))
-        rec["guild_id"] = rec_guild if rec_guild is not None else None
-        rec_board = _snowflake_str(rec.get("board_message_id"))
-        rec["board_message_id"] = rec_board if rec_board is not None else None
-        if not isinstance(rec.get("tasks"), list):
-            rec["tasks"] = []
-        for row in rec["tasks"]:
-            if isinstance(row, dict):
-                thread_sf = _snowflake_str(row.get("thread_id"))
-                row["thread_id"] = thread_sf if thread_sf is not None else None
-                created_by_sf = _snowflake_str(row.get("created_by"))
-                if created_by_sf is not None:
-                    row["created_by"] = created_by_sf
-                assignee_sf = _snowflake_str(row.get("assignee_id"))
-                row["assignee_id"] = assignee_sf if assignee_sf is not None else None
-                assignees = row.get("assignee_ids", [])
-                if isinstance(assignees, list):
-                    row["assignee_ids"] = [
-                        sf for sf in (_snowflake_str(x) for x in assignees) if sf is not None
-                    ]
-        lists[str(ch)] = rec
-
-    # Auto-heal list guild pointers if cache only has one known guild.
-    if len(guilds) == 1:
-        only_guild_id = next(iter(guilds.keys()))
-        for rec in lists.values():
-            if not isinstance(rec, dict):
-                continue
-            rec_guild_id = _snowflake_str(rec.get("guild_id"))
-            if rec_guild_id is None or rec_guild_id not in guilds:
-                rec["guild_id"] = only_guild_id
-
-    todo_cfg["guilds"] = guilds
-    todo_cfg["lists"] = lists
-    data["todo_config"] = todo_cfg
-
-    # Drop legacy top-level todo keys that caused confusion.
-    data.pop("todo_channel_id", None)
-    data.pop("todo_category_id", None)
-    data.pop("todo_board_messages", None)
-    return data
-
-
-def ensure_cloudflare_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    cloudflare = data.get("cloudflare")
-    if not isinstance(cloudflare, dict):
-        cloudflare = {}
-
-    # Migrate from legacy top-level keys.
-    for key in ("api_token", "api_key", "email", "zone_id", "record_ids", "enabled"):
-        if key not in cloudflare and key in data:
-            cloudflare[key] = data.get(key)
-
-    # Normalize record_ids to a list of string ids.
-    raw_record_ids = cloudflare.get("record_ids", [])
-    if isinstance(raw_record_ids, list):
-        cloudflare["record_ids"] = [str(x) for x in raw_record_ids if x is not None]
-    else:
-        cloudflare["record_ids"] = []
-
-    data["cloudflare"] = cloudflare
-    return data
-
-
-def ensure_notifications_config(data: Dict[str, Any]) -> Dict[str, Any]:
-    notifications = data.get("notifications")
-    if not isinstance(notifications, dict):
-        notifications = {}
-
-    guild_channels = notifications.get("guild_channels")
-    if not isinstance(guild_channels, dict):
-        guild_channels = {}
-
-    normalized: Dict[str, str] = {}
-    for raw_guild_id, raw_channel_id in guild_channels.items():
-        guild_id = _snowflake_str(raw_guild_id)
-        channel_id = _snowflake_str(raw_channel_id)
-        if guild_id is None or channel_id is None:
-            continue
-        normalized[guild_id] = channel_id
-
-    notifications["guild_channels"] = normalized
-    data["notifications"] = notifications
-    return data
+    _CACHE_REPO.write(data)
 
 
 def read_cache_with_defaults() -> Dict[str, Any]:
     """
     Load cache.json and apply schema defaults/migrations. Writes back if updated.
     """
-    data = read_cache_json()
+    data = _CACHE_REPO.read_raw()
     before = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
     data = normalize_cache_data(data)
@@ -271,7 +39,7 @@ def read_cache_with_defaults() -> Dict[str, Any]:
     after = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     if after != before:
         try:
-            write_cache_json(data)
+            _CACHE_REPO.write(data)
         except Exception:
             logging.exception("Failed to write cache defaults to cache.json")
 
@@ -351,11 +119,12 @@ def set_ups_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     """
     Patch UPS config keys and persist. Returns the new UPS config dict.
     """
+    parsed_patch = normalize_ups_patch(patch)
     data = read_cache_with_defaults()
     ups = data.get("ups", {})
     if not isinstance(ups, dict):
         ups = {}
-    ups.update(patch)
+    ups.update(parsed_patch)
     data["ups"] = ups
     write_cache_json(data)
     return ups
@@ -365,6 +134,18 @@ def get_cloudflare_config() -> Dict[str, Any]:
     data = read_cache_with_defaults()
     cfg = data.get("cloudflare", {})
     return cfg if isinstance(cfg, dict) else {}
+
+
+def set_cloudflare_config(patch: Dict[str, Any]) -> Dict[str, Any]:
+    parsed_patch = normalize_cloudflare_patch(patch)
+    data = read_cache_with_defaults()
+    cloudflare = data.get("cloudflare", {})
+    if not isinstance(cloudflare, dict):
+        cloudflare = {}
+    cloudflare.update(parsed_patch)
+    data["cloudflare"] = cloudflare
+    write_cache_json(data)
+    return cloudflare
 
 
 def get_notification_channel_id_for_guild(guild_id: int) -> Optional[int]:
@@ -393,7 +174,8 @@ def set_notification_channel_id_for_guild(guild_id: int, channel_id: int) -> Non
         guild_channels = {}
 
     guild_channels[str(int(guild_id))] = str(int(channel_id))
-    notifications["guild_channels"] = guild_channels
+    patch = normalize_notifications_patch({"guild_channels": guild_channels})
+    notifications.update(patch)
     data["notifications"] = notifications
     write_cache_json(data)
 
@@ -408,7 +190,8 @@ def clear_notification_channel_id_for_guild(guild_id: int) -> None:
         guild_channels = {}
 
     guild_channels.pop(str(int(guild_id)), None)
-    notifications["guild_channels"] = guild_channels
+    patch = normalize_notifications_patch({"guild_channels": guild_channels})
+    notifications.update(patch)
     data["notifications"] = notifications
     write_cache_json(data)
 
@@ -443,7 +226,7 @@ def get_power_restart_notice() -> Optional[Dict[str, Any]]:
 
 def set_power_restart_notice(notice: Dict[str, Any]) -> None:
     data = read_cache_json()
-    data["power_restart_notice"] = notice
+    data["power_restart_notice"] = normalize_power_restart_notice_patch(notice)
     write_cache_json(data)
 
 

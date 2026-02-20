@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
 # Optional dependency: tripplite
 try:
     from tripplite import Battery  # type: ignore
@@ -11,6 +13,26 @@ try:
 except Exception:
     Battery = None  # type: ignore
     TRIPPLITE_AVAILABLE = False
+
+
+class UPSRawStatusModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: Dict[str, Any] = Field(default_factory=dict)
+    input: Dict[str, Any] = Field(default_factory=dict)
+    output: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, value: Any) -> Dict[str, Any]:
+        data = dict(value) if isinstance(value, dict) else {}
+        if not isinstance(data.get("status"), dict):
+            data["status"] = {}
+        if not isinstance(data.get("input"), dict):
+            data["input"] = {}
+        if not isinstance(data.get("output"), dict):
+            data["output"] = {}
+        return data
 
 
 class TrippliteUPSClient:
@@ -53,7 +75,8 @@ class TrippliteUPSClient:
         assert self._battery is not None
 
         try:
-            return self._battery.get()
+            raw = self._battery.get()
+            return UPSRawStatusModel.model_validate(raw).model_dump(mode="json")
         except OSError as e:
             logging.warning("UPS read error (OSError). Reopening connection. %s", e)
 
@@ -65,4 +88,5 @@ class TrippliteUPSClient:
 
             self._battery = Battery()
             self._battery.open()
-            return self._battery.get()
+            raw = self._battery.get()
+            return UPSRawStatusModel.model_validate(raw).model_dump(mode="json")

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from .tripplite_client import TrippliteUPSClient
 from .ups_log import UPSLogStore
 from mitra_bot.services.power_service import execute_power_action
@@ -37,29 +39,6 @@ def _utc_ts_z() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _safe_float(v: Any) -> Optional[float]:
-    try:
-        if v is None:
-            return None
-        return float(v)
-    except Exception:
-        return None
-
-
-def _safe_bool(v: Any) -> Optional[bool]:
-    if v is None:
-        return None
-    try:
-        return bool(v)
-    except Exception:
-        return None
-
-
-def _get_dict(d: Dict[str, Any], key: str) -> Dict[str, Any]:
-    v = d.get(key)
-    return v if isinstance(v, dict) else {}
-
-
 def _fmt_seconds(seconds: Optional[float]) -> str:
     if seconds is None:
         return "unknown"
@@ -75,6 +54,44 @@ def _fmt_seconds(seconds: Optional[float]) -> str:
     if m > 0:
         return f"{m}m {s}s"
     return f"{s}s"
+
+
+class UPSStatusFlagsModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    ac_present: Optional[bool] = Field(default=None, alias="ac present")
+    charging: Optional[bool] = None
+    discharging: Optional[bool] = None
+    shutdown_imminent: Optional[bool] = Field(default=None, alias="shutdown imminent")
+    needs_replacement: Optional[bool] = Field(default=None, alias="needs replacement")
+
+
+class UPSInputModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    voltage: Optional[float] = None
+    frequency: Optional[float] = None
+
+
+class UPSOutputModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    voltage: Optional[float] = None
+    power: Optional[float] = None
+
+
+class UPSStatusModel(BaseModel):
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    status: UPSStatusFlagsModel = Field(default_factory=UPSStatusFlagsModel)
+    input: UPSInputModel = Field(default_factory=UPSInputModel)
+    output: UPSOutputModel = Field(default_factory=UPSOutputModel)
+    health: Optional[float] = None
+    time_to_empty: Optional[float] = Field(default=None, alias="time to empty")
+    battery_percent: Optional[float] = None
+    input_voltage: Optional[float] = None
+    time_to_empty_seconds: Optional[float] = None
+    on_battery: Optional[bool] = None
 
 
 class UPSService:
@@ -132,42 +149,35 @@ class UPSService:
         # Support both:
         # - "legacy/raw" tripplite dict with nested status/input/output and "time to empty"
         # - "refactor" minimal dict with battery_percent/input_voltage/time_to_empty_seconds/on_battery
-        status_flags = _get_dict(status, "status")
-        inp = _get_dict(status, "input")
-        outp = _get_dict(status, "output")
+        parsed = UPSStatusModel.model_validate(status)
 
-        # Flags (legacy)
-        ac_present = _safe_bool(status_flags.get("ac present"))
-        charging = _safe_bool(status_flags.get("charging"))
-        discharging = _safe_bool(status_flags.get("discharging"))
-        shutdown_imminent = _safe_bool(status_flags.get("shutdown imminent"))
-        needs_replacement = _safe_bool(status_flags.get("needs replacement"))
+        ac_present = parsed.status.ac_present
+        charging = parsed.status.charging
+        discharging = parsed.status.discharging
+        shutdown_imminent = parsed.status.shutdown_imminent
+        needs_replacement = parsed.status.needs_replacement
 
-        # Metrics (legacy)
-        health_pct = _safe_float(status.get("health"))
-        time_to_empty_s = _safe_float(status.get("time to empty"))
+        health_pct = parsed.health
+        time_to_empty_s = parsed.time_to_empty
 
-        input_v = _safe_float(inp.get("voltage"))
-        input_hz = _safe_float(inp.get("frequency"))
-        output_v = _safe_float(outp.get("voltage"))
-        output_w = _safe_float(outp.get("power"))
+        input_v = parsed.input.voltage
+        input_hz = parsed.input.frequency
+        output_v = parsed.output.voltage
+        output_w = parsed.output.power
 
-        # Metrics (new/minimal fallbacks)
-        battery_percent = status.get("battery_percent", None)
+        battery_percent = parsed.battery_percent
 
-        # Prefer legacy extracted values; fall back to minimal keys if present
         if input_v is None:
-            input_v = _safe_float(status.get("input_voltage"))
+            input_v = parsed.input_voltage
 
-        # Prefer existing time_to_empty_s; fall back to refactor key
         if time_to_empty_s is None:
-            time_to_empty_s = _safe_float(status.get("time_to_empty_seconds"))
+            time_to_empty_s = parsed.time_to_empty_seconds
 
         # Determine on_battery:
         # 1) if provided explicitly, use it
         # 2) else derive from ac_present if we have it
         # 3) else default False
-        on_battery_val = status.get("on_battery")
+        on_battery_val = parsed.on_battery
         if on_battery_val is not None:
             on_battery = bool(on_battery_val)
         elif ac_present is not None:

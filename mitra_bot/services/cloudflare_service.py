@@ -4,7 +4,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from pydantic import ValidationError
 import requests
+
+from mitra_bot.models.cloudflare_models import (
+    CloudflareAPIEnvelope,
+    CloudflareDNSRecord,
+    CloudflareZone,
+)
 
 BASE_URL = "https://api.cloudflare.com/client/v4"
 
@@ -72,17 +79,23 @@ class CloudflareService:
         )
 
         try:
-            data = response.json()
+            raw = response.json()
         except Exception:
             logging.error("Cloudflare returned non-JSON response.")
             response.raise_for_status()
             raise
 
-        if not data.get("success", False):
-            logging.error("Cloudflare API error: %s", data)
-            raise RuntimeError(f"Cloudflare API error: {data}")
+        try:
+            data = CloudflareAPIEnvelope.model_validate(raw)
+        except ValidationError:
+            logging.error("Cloudflare API response schema validation failed: %s", raw)
+            raise
 
-        return data
+        if not data.success:
+            logging.error("Cloudflare API error: %s", raw)
+            raise RuntimeError(f"Cloudflare API error: {raw}")
+
+        return data.model_dump(mode="json")
 
     # --------------------------------------------------
     # Public API
@@ -93,7 +106,13 @@ class CloudflareService:
         Return all zones available to the API token.
         """
         data = self._request("GET", "/zones")
-        return data.get("result", [])
+        out: List[Dict[str, Any]] = []
+        for raw in data.get("result", []):
+            try:
+                out.append(CloudflareZone.model_validate(raw).model_dump(mode="json"))
+            except ValidationError:
+                logging.debug("Skipping invalid Cloudflare zone payload: %s", raw)
+        return out
 
     def get_dns_records(self, zone_id: str) -> List[Dict[str, Any]]:
         """
@@ -103,7 +122,15 @@ class CloudflareService:
             "GET",
             f"/zones/{zone_id}/dns_records",
         )
-        return data.get("result", [])
+        out: List[Dict[str, Any]] = []
+        for raw in data.get("result", []):
+            try:
+                out.append(
+                    CloudflareDNSRecord.model_validate(raw).model_dump(mode="json")
+                )
+            except ValidationError:
+                logging.debug("Skipping invalid Cloudflare DNS record payload: %s", raw)
+        return out
 
     def update_dns_record(
         self,
@@ -142,4 +169,9 @@ class CloudflareService:
             content,
         )
 
-        return data.get("result", {})
+        result = data.get("result", {})
+        try:
+            return CloudflareDNSRecord.model_validate(result).model_dump(mode="json")
+        except ValidationError:
+            logging.debug("Returning unvalidated Cloudflare update payload: %s", result)
+            return result if isinstance(result, dict) else {}

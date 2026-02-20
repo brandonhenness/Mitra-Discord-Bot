@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import discord
 from mitra_bot.discord_app.bot_factory import AppState, create_bot
 from mitra_bot.logging_setup import setup_logging
+from mitra_bot.storage.cache_schema import RestartNoticeRuntimeModel
 from mitra_bot.storage.cache_store import (
     clear_power_restart_notice,
     get_notification_channel_map,
@@ -64,14 +65,15 @@ async def main_async() -> None:
 
         restart_notice = get_power_restart_notice()
         if restart_notice:
-            channel_id = restart_notice.get("channel_id")
-            message_id = restart_notice.get("message_id")
-            delay = int(restart_notice.get("delay_seconds", 0))
-            force = bool(restart_notice.get("force", False))
-            requester = restart_notice.get("requested_by_user_id")
-            confirmer = restart_notice.get("confirmed_by_user_id")
-            requested_at_epoch = restart_notice.get("requested_at_epoch")
-            confirmed_at_epoch = restart_notice.get("confirmed_at_epoch")
+            notice = RestartNoticeRuntimeModel.model_validate(restart_notice)
+            channel_id = notice.channel_id
+            message_id = notice.message_id
+            delay = notice.delay_seconds
+            force = notice.force
+            requester = notice.requested_by_user_id
+            confirmer = notice.confirmed_by_user_id
+            requested_at_epoch = notice.requested_at_epoch
+            confirmed_at_epoch = notice.confirmed_at_epoch
             restarted_at_epoch = int(datetime.now(timezone.utc).timestamp())
             mode = "immediate" if delay == 0 else "delayed"
 
@@ -141,7 +143,7 @@ async def main_async() -> None:
             )
         else:
             logging.info(
-                "No notify channels configured. Use /settings notification_channel_set."
+                "No notify channels configured. Use /notifications channel set."
             )
 
         logging.info("To-Do lists are managed via per-guild To-Do category and list channels.")
