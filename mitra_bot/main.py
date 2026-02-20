@@ -129,6 +129,8 @@ async def main_async() -> None:
                 "No notify channel configured in cache.json (channel/channel_id)."
             )
 
+        logging.info("To-Do lists are managed via per-guild To-Do category and list channels.")
+
     await bot.start(settings.token)
 
 
