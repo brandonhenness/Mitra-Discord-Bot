@@ -47,6 +47,11 @@ async def main_async() -> None:
             bot.user,
             bot.user.id if bot.user else "unknown",
         )
+        if not bot.intents.members:
+            logging.warning(
+                "Members intent is disabled. Thread leave -> auto-unassign may not work reliably. "
+                "Enable Server Members Intent in Discord portal and set MITRA_ENABLE_MEMBERS_INTENT=true."
+            )
 
         # Ensure roles exist in every guild the bot is in
         for guild in bot.guilds:

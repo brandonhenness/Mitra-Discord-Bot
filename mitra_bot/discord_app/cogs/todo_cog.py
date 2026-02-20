@@ -194,7 +194,7 @@ class TaskThreadView(discord.ui.View):
         await self.cog.refresh_board(list_channel_id)
         await interaction.response.edit_message(embed=_build_task_embed(item), view=TaskThreadView(self.cog))
 
-    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, custom_id="todo:thread:edit")
+    @discord.ui.button(label="Edit", style=discord.ButtonStyle.primary, custom_id="todo:thread:edit", row=0)
     async def edit_button(self, button: discord.ui.Button, interaction: discord.Interaction) -> None:
         list_channel_id, items, item = await self._resolve(interaction)
         if list_channel_id is None or item is None:
@@ -210,19 +210,19 @@ class TaskThreadView(discord.ui.View):
             )
         )
 
-    @discord.ui.button(label="Open", style=discord.ButtonStyle.secondary, custom_id="todo:thread:open")
+    @discord.ui.button(label="Open", style=discord.ButtonStyle.secondary, custom_id="todo:thread:open", row=1)
     async def set_open(self, button: discord.ui.Button, interaction: discord.Interaction) -> None:
         await self._set_status(interaction, "open")
 
-    @discord.ui.button(label="In Progress", style=discord.ButtonStyle.primary, custom_id="todo:thread:in_progress")
+    @discord.ui.button(label="In Progress", style=discord.ButtonStyle.primary, custom_id="todo:thread:in_progress", row=1)
     async def set_in_progress(self, button: discord.ui.Button, interaction: discord.Interaction) -> None:
         await self._set_status(interaction, "in_progress")
 
-    @discord.ui.button(label="Done", style=discord.ButtonStyle.success, custom_id="todo:thread:done")
+    @discord.ui.button(label="Done", style=discord.ButtonStyle.success, custom_id="todo:thread:done", row=1)
     async def set_done(self, button: discord.ui.Button, interaction: discord.Interaction) -> None:
         await self._set_status(interaction, "done")
 
-    @discord.ui.button(label="Assign Me", style=discord.ButtonStyle.secondary, custom_id="todo:thread:assign_me")
+    @discord.ui.button(label="Assign Me", style=discord.ButtonStyle.success, custom_id="todo:thread:assign_me", row=2)
     async def assign_me(self, button: discord.ui.Button, interaction: discord.Interaction) -> None:
         list_channel_id, items, item = await self._resolve(interaction)
         if list_channel_id is None or item is None:
@@ -245,7 +245,7 @@ class TaskThreadView(discord.ui.View):
         await self.cog.refresh_board(list_channel_id)
         await interaction.response.edit_message(embed=_build_task_embed(item), view=TaskThreadView(self.cog))
 
-    @discord.ui.button(label="Unassign Me", style=discord.ButtonStyle.secondary, custom_id="todo:thread:unassign_me")
+    @discord.ui.button(label="Unassign Me", style=discord.ButtonStyle.danger, custom_id="todo:thread:unassign_me", row=2)
     async def unassign_me(self, button: discord.ui.Button, interaction: discord.Interaction) -> None:
         list_channel_id, items, item = await self._resolve(interaction)
         if list_channel_id is None or item is None:
@@ -476,11 +476,11 @@ class TodoCog(commands.Cog):
 
         if category is None:
             # Reuse existing category by name if cache was reset.
-            category = discord.utils.get(guild.categories, name="Mitra To-Do")
+            category = discord.utils.get(guild.categories, name="To-Do")
 
         if category is None:
             try:
-                category = await guild.create_category("Mitra To-Do")
+                category = await guild.create_category("To-Do")
                 set_todo_category_id_for_guild(guild.id, category.id)
                 logging.info("Created todo category id=%s in guild_id=%s", category.id, guild.id)
             except Exception:
@@ -622,13 +622,14 @@ class TodoCog(commands.Cog):
             embed.add_field(name="Tasks", value="No tasks yet. Click **Add Task**.", inline=False)
             return embed
 
-        lines: List[str] = []
+        task_lines: List[str] = []
+        assignee_lines: List[str] = []
         for item in items[:25]:
             thread = f"<#{item.thread_id}>" if item.thread_id else "_thread pending_"
-            lines.append(
-                f"{_status_emoji(item.status)} `#{item.id}` **{_clamp(item.title, 60)}** | {_assignee_mentions(item)} | {thread}"
-            )
-        embed.add_field(name="Tasks", value="\n".join(lines), inline=False)
+            task_lines.append(f"{_status_emoji(item.status)} `#{item.id}` {thread}")
+            assignee_lines.append(_assignee_mentions(item))
+        embed.add_field(name="Task", value="\n".join(task_lines), inline=True)
+        embed.add_field(name="Assignees", value="\n".join(assignee_lines), inline=True)
         if len(items) > 25:
             embed.set_footer(text=f"Showing first 25 of {len(items)} tasks.")
         return embed
@@ -752,6 +753,68 @@ class TodoCog(commands.Cog):
                     return list_channel_id, items, item
         return None, [], None
 
+    async def _create_task(
+        self,
+        guild: discord.Guild,
+        list_channel_id: int,
+        title: str,
+        notes: str,
+        creator_id: int,
+        creator_member: Optional[discord.Member],
+    ) -> Tuple[TodoItem, str]:
+        items = self._load_items(list_channel_id)
+        next_id = max((i.id for i in items), default=0) + 1
+        item = TodoItem(
+            id=next_id,
+            title=title,
+            notes=notes,
+            status="open",
+            assignee_ids=[creator_id],
+            thread_id=None,
+            created_by=creator_id,
+            created_at=_now_iso(),
+        )
+        items.append(item)
+        self._save_items(list_channel_id, items)
+
+        thread_mention = "Not created"
+        try:
+            list_channel = guild.get_channel(list_channel_id)
+            if not isinstance(list_channel, discord.TextChannel):
+                return item, "List channel not found"
+
+            thread = await list_channel.create_thread(
+                name=_clamp(f"todo-{item.id}-{item.title}", 100),
+                auto_archive_duration=1440,
+            )
+            item.thread_id = thread.id
+            self._save_items(list_channel_id, items)
+            await thread.send(embed=_build_task_embed(item), view=TaskThreadView(self))
+            if isinstance(creator_member, discord.Member):
+                try:
+                    await thread.add_user(creator_member)
+                except Exception:
+                    logging.debug("Could not add creator to task thread.")
+            thread_mention = thread.mention
+        except Exception:
+            logging.exception("Failed to auto-create task thread.")
+
+        await self.refresh_board(list_channel_id)
+        await self.refresh_hub(guild.id)
+        return item, thread_mention
+
+    def _resolve_list_channel_id_from_context(
+        self, guild: discord.Guild, channel: Optional[discord.abc.GuildChannel], explicit_list: Optional[discord.TextChannel]
+    ) -> Optional[int]:
+        if explicit_list is not None:
+            return explicit_list.id
+        if isinstance(channel, discord.TextChannel):
+            list_ids = set(get_todo_list_channel_ids_for_guild(guild.id))
+            category_ids = {ch.id for ch in self._list_channels_in_category(guild)}
+            if channel.id in (list_ids | category_ids):
+                return channel.id
+        return None
+
     async def _unassign_user_for_thread(
         self, guild: discord.Guild, thread_id: int, user_id: int
     ) -> None:
@@ -762,6 +825,9 @@ class TodoCog(commands.Cog):
             return
         item.assignee_ids = [uid for uid in item.assignee_ids if uid != user_id]
         self._save_items(list_channel_id, items)
+        thread = guild.get_thread(thread_id)
+        if isinstance(thread, discord.Thread):
+            await self._refresh_task_thread_panel(thread, item)
         await self.refresh_board(list_channel_id)
         await self.refresh_hub(guild.id)
 
@@ -815,7 +881,7 @@ class TodoCog(commands.Cog):
             self._assignee_sync_task.cancel()
 
     @commands.Cog.listener()
-    async def on_raw_thread_members_update(
+    async def on_raw_thread_member_remove(
         self, payload: discord.RawThreadMembersUpdateEvent
     ) -> None:
         guild_id = getattr(payload, "guild_id", None)
@@ -828,7 +894,12 @@ class TodoCog(commands.Cog):
             return
 
         data = getattr(payload, "data", {}) or {}
-        removed_raw = data.get("removed_member_ids", []) if isinstance(data, dict) else []
+        removed_raw = []
+        if isinstance(data, dict):
+            removed_raw = data.get("removed_member_ids", [])
+        # Compatibility fallback in case the event object exposes a direct field in future versions.
+        if not removed_raw:
+            removed_raw = getattr(payload, "removed_member_ids", []) or []
         removed_ids: List[int] = []
         for x in removed_raw:
             try:
@@ -884,6 +955,155 @@ class TodoCog(commands.Cog):
         if hub_channel_id == channel.id:
             clear_todo_hub_message_id_for_guild(channel.guild.id)
         await self.refresh_hub(channel.guild.id)
+
+    @todo.command(name="add_task", description="Add a task to a to-do list")
+    async def add_task_slash(
+        self,
+        ctx: discord.ApplicationContext,
+        title: str = discord.Option(str, description="Task title", required=True),
+        notes: str = discord.Option(str, description="Optional notes", required=False, default=""),
+        list_channel: Optional[discord.TextChannel] = discord.Option(
+            discord.TextChannel,
+            description="List channel (optional if run inside a list channel)",
+            required=False,
+            default=None,
+        ),
+    ) -> None:
+        if ctx.guild is None or ctx.user is None:
+            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            return
+        clean_title = title.strip()
+        if not clean_title:
+            await ctx.respond("Title cannot be empty.", ephemeral=True)
+            return
+
+        list_channel_id = self._resolve_list_channel_id_from_context(ctx.guild, ctx.channel, list_channel)
+        if list_channel_id is None:
+            await ctx.respond(
+                "Run this command in a list channel or pass `list_channel` explicitly.",
+                ephemeral=True,
+            )
+            return
+
+        await ctx.defer(ephemeral=True)
+        item, thread_mention = await self._create_task(
+            guild=ctx.guild,
+            list_channel_id=list_channel_id,
+            title=clean_title,
+            notes=(notes or "").strip(),
+            creator_id=ctx.user.id,
+            creator_member=ctx.user if isinstance(ctx.user, discord.Member) else None,
+        )
+        await ctx.followup.send(
+            f"Task created: `#{item.id}` in <#{list_channel_id}>. Thread: {thread_mention}",
+            ephemeral=True,
+        )
+
+    @todo.command(name="edit", description="Edit the current task (run inside a task thread)")
+    async def edit_in_thread(
+        self,
+        ctx: discord.ApplicationContext,
+        title: str = discord.Option(str, description="New task title", required=True),
+        notes: str = discord.Option(str, description="New notes (optional)", required=False, default=""),
+    ) -> None:
+        if ctx.guild is None or not isinstance(ctx.channel, discord.Thread):
+            await ctx.respond("Use this command inside a task thread.", ephemeral=True)
+            return
+        list_channel_id, items, item = self.find_task_by_thread(ctx.guild, ctx.channel.id)
+        if list_channel_id is None or item is None:
+            await ctx.respond("This thread is not linked to a task.", ephemeral=True)
+            return
+        clean_title = title.strip()
+        if not clean_title:
+            await ctx.respond("Title cannot be empty.", ephemeral=True)
+            return
+        item.title = clean_title
+        item.notes = (notes or "").strip()
+        self._save_items(list_channel_id, items)
+        await self._refresh_task_thread_panel(ctx.channel, item)
+        await self.refresh_board(list_channel_id)
+        await self.refresh_hub(ctx.guild.id)
+        await ctx.respond(f"Updated task `#{item.id}`.", ephemeral=True)
+
+    @todo.command(name="status", description="Set status for current task thread")
+    async def status_in_thread(
+        self,
+        ctx: discord.ApplicationContext,
+        status: str = discord.Option(
+            str,
+            description="Task status",
+            required=True,
+            choices=["open", "in_progress", "done"],
+        ),
+    ) -> None:
+        if ctx.guild is None or not isinstance(ctx.channel, discord.Thread):
+            await ctx.respond("Use this command inside a task thread.", ephemeral=True)
+            return
+        list_channel_id, items, item = self.find_task_by_thread(ctx.guild, ctx.channel.id)
+        if list_channel_id is None or item is None:
+            await ctx.respond("This thread is not linked to a task.", ephemeral=True)
+            return
+        item.status = status
+        self._save_items(list_channel_id, items)
+        await self._refresh_task_thread_panel(ctx.channel, item)
+        await self.refresh_board(list_channel_id)
+        await self.refresh_hub(ctx.guild.id)
+        await ctx.respond(
+            f"Set task `#{item.id}` to **{_status_label(status)}**.",
+            ephemeral=True,
+        )
+
+    @todo.command(name="assign_me", description="Assign yourself to current task thread")
+    async def assign_me_in_thread(self, ctx: discord.ApplicationContext) -> None:
+        if ctx.guild is None or not isinstance(ctx.channel, discord.Thread):
+            await ctx.respond("Use this command inside a task thread.", ephemeral=True)
+            return
+        if ctx.user is None:
+            await ctx.respond("Invalid user.", ephemeral=True)
+            return
+        list_channel_id, items, item = self.find_task_by_thread(ctx.guild, ctx.channel.id)
+        if list_channel_id is None or item is None:
+            await ctx.respond("This thread is not linked to a task.", ephemeral=True)
+            return
+        uid = ctx.user.id
+        if uid not in item.assignee_ids:
+            item.assignee_ids.append(uid)
+            self._save_items(list_channel_id, items)
+        if isinstance(ctx.user, discord.Member):
+            try:
+                await ctx.channel.add_user(ctx.user)
+            except Exception:
+                logging.debug("Could not add assigning user to thread.")
+        await self._refresh_task_thread_panel(ctx.channel, item)
+        await self.refresh_board(list_channel_id)
+        await self.refresh_hub(ctx.guild.id)
+        await ctx.respond(f"Assigned you to task `#{item.id}`.", ephemeral=True)
+
+    @todo.command(name="unassign_me", description="Unassign yourself from current task thread")
+    async def unassign_me_in_thread(self, ctx: discord.ApplicationContext) -> None:
+        if ctx.guild is None or not isinstance(ctx.channel, discord.Thread):
+            await ctx.respond("Use this command inside a task thread.", ephemeral=True)
+            return
+        if ctx.user is None:
+            await ctx.respond("Invalid user.", ephemeral=True)
+            return
+        list_channel_id, items, item = self.find_task_by_thread(ctx.guild, ctx.channel.id)
+        if list_channel_id is None or item is None:
+            await ctx.respond("This thread is not linked to a task.", ephemeral=True)
+            return
+        uid = ctx.user.id
+        if uid in item.assignee_ids:
+            item.assignee_ids = [x for x in item.assignee_ids if x != uid]
+            self._save_items(list_channel_id, items)
+            if isinstance(ctx.user, discord.Member):
+                try:
+                    await ctx.channel.remove_user(ctx.user)
+                except Exception:
+                    logging.debug("Could not remove user from thread.")
+            await self._refresh_task_thread_panel(ctx.channel, item)
+            await self.refresh_board(list_channel_id)
+            await self.refresh_hub(ctx.guild.id)
+        await ctx.respond(f"Unassigned you from task `#{item.id}`.", ephemeral=True)
 
     @todo.command(name="list_create", description="Create a new to-do list channel")
     async def list_create(
