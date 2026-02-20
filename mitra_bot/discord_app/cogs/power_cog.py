@@ -265,7 +265,6 @@ class PowerCog(commands.Cog):
             await admin_guard
             return
 
-        mode = "immediate" if delay_seconds == 0 else "delayed"
         view = PowerActionView(
             action="restart",
             delay_seconds=delay_seconds,
@@ -310,7 +309,6 @@ class PowerCog(commands.Cog):
             await admin_guard
             return
 
-        mode = "immediate" if delay_seconds == 0 else "delayed"
         view = PowerActionView(
             action="shutdown",
             delay_seconds=delay_seconds,

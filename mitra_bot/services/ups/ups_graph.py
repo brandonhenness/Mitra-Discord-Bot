@@ -8,6 +8,7 @@ from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib
+from pydantic import BaseModel, ConfigDict, model_validator
 
 matplotlib.use("Agg")  # headless-safe
 
@@ -19,6 +20,24 @@ try:
     from zoneinfo import ZoneInfo
 except Exception:  # pragma: no cover
     ZoneInfo = None  # type: ignore
+
+
+class UPSGraphRowModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    ts: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_ts(cls, value: Any) -> Dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError("UPS graph row must be an object.")
+        row = dict(value)
+        ts = row.get("ts") or row.get("timestamp") or row.get("time")
+        if not isinstance(ts, str) or not ts.strip():
+            raise ValueError("UPS graph row is missing timestamp.")
+        row["ts"] = ts.strip()
+        return row
 
 
 def _parse_to_local_naive(ts: str, tz_name: str) -> Optional[datetime]:
@@ -94,9 +113,13 @@ def build_ups_status_graph(
 
     parsed: List[Tuple[datetime, Dict[str, Any]]] = []
     for r in rows:
-        dt = _parse_to_local_naive(str(r.get("ts", "")), timezone_name)
+        try:
+            norm = UPSGraphRowModel.model_validate(r).model_dump(mode="json")
+        except Exception:
+            continue
+        dt = _parse_to_local_naive(str(norm.get("ts", "")), timezone_name)
         if dt:
-            parsed.append((dt, r))
+            parsed.append((dt, norm))
 
     if len(parsed) < 2:
         return None

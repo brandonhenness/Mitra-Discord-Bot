@@ -4,3 +4,4 @@ requests>=2.31,<3
 tripplite>=0.4,<1
 matplotlib>=3.7,<4
 tzdata>=2023.3
+pydantic>=2.7,<3
