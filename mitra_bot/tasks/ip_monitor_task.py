@@ -8,7 +8,7 @@ from typing import Optional
 
 import discord
 from discord.ext import tasks
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mitra_bot.services.cloudflare_service import CloudflareService
 from mitra_bot.services.ip_service import get_public_ip
@@ -24,6 +24,31 @@ class CloudflareDNSUpdateConfig(BaseModel):
     api_token: str = ""
     api_key: str = ""
     email: str = ""
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def _coerce_enabled(cls, value: object) -> bool:
+        # Treat null/missing config as enabled by default.
+        if value is None:
+            return True
+        return bool(value)
+
+    @field_validator("zone_id", "api_token", "api_key", "email", mode="before")
+    @classmethod
+    def _coerce_optional_str(cls, value: object) -> str:
+        # Legacy cache entries may contain null for unset string fields.
+        if value is None:
+            return ""
+        return str(value)
+
+    @field_validator("record_ids", mode="before")
+    @classmethod
+    def _coerce_record_ids(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return [str(value)]
 
     @model_validator(mode="after")
     def _normalize(self) -> "CloudflareDNSUpdateConfig":

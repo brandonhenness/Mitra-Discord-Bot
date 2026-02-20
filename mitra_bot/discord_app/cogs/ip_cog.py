@@ -88,11 +88,6 @@ class IPCog(commands.Cog):
 
         msg_body = _format_ip_message(new_ip, is_change=True)
 
-        channel_id = self.bot.state.channel_id  # type: ignore[attr-defined]
-        if not channel_id:
-            logging.warning("No channel_id configured; cannot send IP change alert.")
-            return
-
         notifier = Notifier(self.bot)
 
         sent = 0
@@ -122,6 +117,15 @@ class IPCog(commands.Cog):
 
         if sent == 0:
             # Backward compatibility for older single-channel config.
+            channel_id = self.bot.state.channel_id  # type: ignore[attr-defined]
+            if not channel_id:
+                logging.warning(
+                    "No per-guild notification channel or legacy channel_id configured; "
+                    "cannot send IP change alert."
+                )
+                await save_ip(new_ip)
+                return
+
             mention_prefix = ""
             for guild in self.bot.guilds:
                 role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
