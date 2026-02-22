@@ -111,7 +111,7 @@ py -m mitra_bot.main
    - `/ip subscribe`
    - `/ups status`
    - `/power restart`, `/power shutdown`, `/power cancel` (admin role required)
-   - `/update check`, `/update install`, `/update changelog` (or `/update changelong`), `/update status`, `/update auto`, `/update beta`, `/update startup`, `/update interval`, `/update repo`, `/update dismiss` (admin role required)
+   - `/update check`, `/update install`, `/update changelog` (or `/update changelong`), `/update status`, `/update auto`, `/update startup`, `/update interval`, `/update repo`, `/update dismiss` (admin role required)
 
 ## Notes
 

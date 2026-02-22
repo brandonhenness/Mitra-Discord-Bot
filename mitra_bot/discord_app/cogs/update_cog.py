@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from typing import Optional
 
@@ -142,13 +141,9 @@ class UpdateCog(commands.Cog):
                 inline=True,
             )
             if check.repo:
-                embed.add_field(
-                    name="Repository", value=f"`{check.repo}`", inline=False
-                )
+                embed.add_field(name="Repository", value=f"`{check.repo}`", inline=False)
             if check.error:
-                embed.add_field(
-                    name="Error", value=_trim(check.error, 300), inline=False
-                )
+                embed.add_field(name="Error", value=_trim(check.error, 300), inline=False)
 
         if release is not None:
             embed.add_field(name="Version", value=f"`{release.version}`", inline=True)
@@ -180,9 +175,7 @@ class UpdateCog(commands.Cog):
             if isinstance(ch, (discord.TextChannel, discord.Thread)):
                 return ch
 
-        legacy_channel_id = getattr(
-            getattr(self.bot, "state", None), "channel_id", None
-        )
+        legacy_channel_id = getattr(getattr(self.bot, "state", None), "channel_id", None)
         if legacy_channel_id:
             ch = self.bot.get_channel(int(legacy_channel_id))
             if ch is None:
@@ -229,9 +222,7 @@ class UpdateCog(commands.Cog):
 
         channel = await self._find_announce_channel()
         if channel is None:
-            logging.info(
-                "Update is available but no notification channel is configured."
-            )
+            logging.info("Update is available but no notification channel is configured.")
             return
 
         embed = self.build_embed(
@@ -256,11 +247,12 @@ class UpdateCog(commands.Cog):
             )
             return
 
-        await origin_message.channel.send(
-            "Update installed. Restarting bot process now."
-        )
-        await self.bot.close()
-        os._exit(0)
+        await origin_message.channel.send("Update installed. Restarting bot process now.")
+        setattr(self.bot, "_mitra_restart_requested", True)
+        try:
+            await self.bot.close()
+        except Exception:
+            logging.exception("Bot close raised during updater restart.")
 
     async def install_release_with_feedback(
         self,
@@ -467,9 +459,7 @@ class UpdateCog(commands.Cog):
 
         cfg = get_updater_config()
         embed = discord.Embed(title="Updater Status", color=discord.Color.blurple())
-        embed.add_field(
-            name="Enabled", value=f"`{bool(cfg.get('enabled', True))}`", inline=True
-        )
+        embed.add_field(name="Enabled", value=f"`{bool(cfg.get('enabled', True))}`", inline=True)
         embed.add_field(
             name="Startup Check",
             value=f"`{bool(cfg.get('check_on_startup', True))}`",
@@ -630,7 +620,7 @@ class UpdateCog(commands.Cog):
         ctx: discord.ApplicationContext,
         repository: str = discord.Option(
             str,
-            description="Example: brandonhenness/Mitra-Discord-Bot, or auto",
+            description="Example: Henness0666/Mitra-Discord-Bot, or auto",
             required=True,
         ),
     ) -> None:

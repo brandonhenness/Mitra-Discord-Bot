@@ -305,7 +305,6 @@ class UpdaterConfigModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     enabled: bool = True
-    include_prerelease: bool = False
     check_on_startup: bool = True
     check_interval_seconds: int = 21600
     github_repo: Optional[str] = None
@@ -322,7 +321,6 @@ class UpdaterPatchModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: Optional[bool] = None
-    include_prerelease: Optional[bool] = None
     check_on_startup: Optional[bool] = None
     check_interval_seconds: Optional[int] = None
     github_repo: Optional[str] = None

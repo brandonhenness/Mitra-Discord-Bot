@@ -75,7 +75,6 @@ class CacheSchemaTests(unittest.TestCase):
         out = normalize_cache_data({})
         self.assertIn("updater", out)
         self.assertTrue(out["updater"]["enabled"])
-        self.assertFalse(out["updater"]["include_prerelease"])
         self.assertTrue(out["updater"]["check_on_startup"])
         self.assertEqual(out["updater"]["check_interval_seconds"], 21600)
 
@@ -83,7 +82,6 @@ class CacheSchemaTests(unittest.TestCase):
         out = normalize_updater_patch(
             {
                 "enabled": False,
-                "include_prerelease": True,
                 "check_on_startup": False,
                 "check_interval_seconds": 3600,
                 "github_repo": "owner/repo",
@@ -91,7 +89,6 @@ class CacheSchemaTests(unittest.TestCase):
             }
         )
         self.assertFalse(out["enabled"])
-        self.assertTrue(out["include_prerelease"])
         self.assertFalse(out["check_on_startup"])
         self.assertEqual(out["check_interval_seconds"], 3600)
         self.assertEqual(out["github_repo"], "owner/repo")

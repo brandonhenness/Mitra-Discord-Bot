@@ -166,7 +166,17 @@ async def main_async() -> None:
 
         logging.info("To-Do lists are managed via per-guild To-Do category and list channels.")
 
-    await bot.start(settings.token)
+    try:
+        await bot.start(settings.token)
+    except RuntimeError as exc:
+        if getattr(bot, "_mitra_restart_requested", False) and "Session is closed" in str(
+            exc
+        ):
+            logging.info(
+                "Ignoring session-closed runtime during intentional updater restart."
+            )
+            return
+        raise
 
 
 def main() -> None:
