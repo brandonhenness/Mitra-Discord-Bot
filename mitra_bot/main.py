@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import discord
 from mitra_bot.discord_app.bot_factory import AppState, create_bot
@@ -45,6 +46,93 @@ async def main_async() -> None:
 
     started = {"done": False}
 
+    def _ctx_value(ctx: discord.ApplicationContext, name: str, default: Any = None) -> Any:
+        return getattr(ctx, name, default)
+
+    def _command_name(ctx: discord.ApplicationContext) -> str:
+        cmd = _ctx_value(ctx, "command")
+        if cmd is not None:
+            qualified = getattr(cmd, "qualified_name", None)
+            if qualified:
+                return str(qualified)
+            plain = getattr(cmd, "name", None)
+            if plain:
+                return str(plain)
+
+        interaction = _ctx_value(ctx, "interaction")
+        data = getattr(interaction, "data", None) if interaction is not None else None
+        if isinstance(data, dict):
+            raw_name = data.get("name")
+            if raw_name:
+                return str(raw_name)
+        return "unknown"
+
+    def _ctx_scope(ctx: discord.ApplicationContext) -> tuple[str, str, str]:
+        guild = _ctx_value(ctx, "guild")
+        user = _ctx_value(ctx, "user") or _ctx_value(ctx, "author")
+        channel = _ctx_value(ctx, "channel")
+
+        guild_id = str(getattr(guild, "id", "dm"))
+        channel_id = str(_ctx_value(ctx, "channel_id", None) or getattr(channel, "id", "unknown"))
+        user_id = str(getattr(user, "id", "unknown"))
+        return guild_id, channel_id, user_id
+
+    def _command_options(ctx: discord.ApplicationContext) -> str:
+        selected = _ctx_value(ctx, "selected_options")
+        if selected is not None:
+            text = repr(selected)
+            return text if len(text) <= 500 else (text[:497] + "...")
+
+        interaction = _ctx_value(ctx, "interaction")
+        data = getattr(interaction, "data", None) if interaction is not None else None
+        if isinstance(data, dict):
+            options = data.get("options")
+            if options is not None:
+                text = repr(options)
+                return text if len(text) <= 500 else (text[:497] + "...")
+        return "{}"
+
+    @bot.event
+    async def on_application_command(ctx: discord.ApplicationContext) -> None:
+        command_name = _command_name(ctx)
+        guild_id, channel_id, user_id = _ctx_scope(ctx)
+        options = _command_options(ctx)
+        logging.info(
+            "Command invoke: /%s guild_id=%s channel_id=%s user_id=%s options=%s",
+            command_name,
+            guild_id,
+            channel_id,
+            user_id,
+            options,
+        )
+
+    @bot.event
+    async def on_application_command_completion(ctx: discord.ApplicationContext) -> None:
+        command_name = _command_name(ctx)
+        guild_id, channel_id, user_id = _ctx_scope(ctx)
+        logging.info(
+            "Command complete: /%s guild_id=%s channel_id=%s user_id=%s",
+            command_name,
+            guild_id,
+            channel_id,
+            user_id,
+        )
+
+    @bot.event
+    async def on_application_command_error(
+        ctx: discord.ApplicationContext, error: Exception
+    ) -> None:
+        command_name = _command_name(ctx)
+        guild_id, channel_id, user_id = _ctx_scope(ctx)
+        logging.exception(
+            "Command error: /%s guild_id=%s channel_id=%s user_id=%s err=%s",
+            command_name,
+            guild_id,
+            channel_id,
+            user_id,
+            error,
+        )
+
     @bot.event
     async def on_ready():
         if started["done"]:
@@ -67,9 +155,16 @@ async def main_async() -> None:
             await ensure_role(guild, settings.admin_role_name)
             await ensure_role(guild, settings.ip_subscriber_role_name)
 
+        logging.info(
+            "Starting tasks: ip_monitor=%ss ups_monitor=%ss update_monitor=%ss",
+            settings.ip_poll_seconds,
+            settings.ups.poll_seconds,
+            int(updater_cfg.get("check_interval_seconds", 21600)),
+        )
         await ip_task.start()
         await ups_task.start()
         await update_task.start()
+        logging.info("Background tasks started.")
 
         if bool(updater_cfg.get("enabled", True)) and bool(
             updater_cfg.get("check_on_startup", True)

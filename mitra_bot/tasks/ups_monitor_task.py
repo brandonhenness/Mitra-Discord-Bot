@@ -7,7 +7,7 @@ import discord
 from discord.ext import tasks
 
 from mitra_bot.services.notifier import Notifier
-from mitra_bot.storage.cache_store import read_cache_with_defaults
+from mitra_bot.storage.cache_store import read_cache_with_defaults, set_ups_config
 
 
 class UPSMonitorTask:
@@ -34,7 +34,17 @@ class UPSMonitorTask:
 
         try:
             event = cog.poll_for_event()  # type: ignore[attr-defined]
-        except Exception:
+        except Exception as exc:
+            if self._is_no_ups_connected_error(exc):
+                set_ups_config({"enabled": False, "log_enabled": False})
+                try:
+                    cog._reload_from_cache()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                logging.warning(
+                    "No UPS detected. Automatically disabled UPS monitoring and UPS logging."
+                )
+                return
             logging.exception("UPS poll failed.")
             return
 
@@ -60,3 +70,19 @@ class UPSMonitorTask:
     @loop.before_loop
     async def before_loop(self) -> None:
         await self.bot.wait_until_ready()
+
+    @staticmethod
+    def _is_no_ups_connected_error(exc: Exception) -> bool:
+        text = str(exc).strip().lower()
+        if not text:
+            return False
+        markers = (
+            "no ups connected",
+            "no ups",
+            "no battery connected",
+            "no device",
+            "device not found",
+            "cannot find ups",
+            "not connected",
+        )
+        return any(marker in text for marker in markers)

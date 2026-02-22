@@ -81,10 +81,7 @@ def resolve_github_repo() -> Optional[str]:
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
 
-    repo = _resolve_repo_from_git()
-    if repo:
-        set_updater_config({"github_repo": repo})
-    return repo
+    return _resolve_repo_from_git()
 
 
 def _release_info_from_payload(payload: dict, repo: str) -> Optional[ReleaseInfo]:

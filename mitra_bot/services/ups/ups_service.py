@@ -126,11 +126,30 @@ class UPSService:
 
         try:
             status = self.client.get_status()
-        except Exception:
+        except Exception as exc:
+            if _is_no_ups_connected_error(exc):
+                # Let the task layer decide policy (e.g., auto-disable monitoring/logging).
+                raise RuntimeError("No UPS connected.") from exc
             logging.exception("Failed to poll UPS.")
             return None
 
         return self._process_status(status)
+
+
+def _is_no_ups_connected_error(exc: Exception) -> bool:
+    text = str(exc).strip().lower()
+    if not text:
+        return False
+    markers = (
+        "no ups connected",
+        "no ups",
+        "no battery connected",
+        "no device",
+        "device not found",
+        "cannot find ups",
+        "not connected",
+    )
+    return any(marker in text for marker in markers)
 
     # --------------------------------------------------
     # Internal logic
