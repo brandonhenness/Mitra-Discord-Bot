@@ -12,6 +12,7 @@ from mitra_bot.storage.cache_schema import (
     normalize_cloudflare_patch,
     normalize_notifications_patch,
     normalize_power_restart_notice_patch,
+    normalize_updater_patch,
     normalize_ups_patch,
 )
 
@@ -212,6 +213,28 @@ def get_notification_channel_map() -> Dict[int, int]:
         except Exception:
             continue
     return out
+
+
+# -----------------------------
+# Updater helpers
+# -----------------------------
+
+def get_updater_config() -> Dict[str, Any]:
+    data = read_cache_with_defaults()
+    updater = data.get("updater", {})
+    return updater if isinstance(updater, dict) else {}
+
+
+def set_updater_config(patch: Dict[str, Any]) -> Dict[str, Any]:
+    parsed_patch = normalize_updater_patch(patch)
+    data = read_cache_with_defaults()
+    updater = data.get("updater", {})
+    if not isinstance(updater, dict):
+        updater = {}
+    updater.update(parsed_patch)
+    data["updater"] = updater
+    write_cache_json(data)
+    return updater
 
 
 # -----------------------------

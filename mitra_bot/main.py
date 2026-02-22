@@ -13,10 +13,12 @@ from mitra_bot.storage.cache_store import (
     clear_power_restart_notice,
     get_notification_channel_map,
     get_power_restart_notice,
+    get_updater_config,
 )
 from mitra_bot.settings import load_settings
 from mitra_bot.services.role_manager import ensure_role
 from mitra_bot.tasks.ip_monitor_task import IPMonitorTask
+from mitra_bot.tasks.update_monitor_task import UpdateMonitorTask
 from mitra_bot.tasks.ups_monitor_task import UPSMonitorTask
 
 
@@ -35,6 +37,11 @@ async def main_async() -> None:
 
     ip_task = IPMonitorTask(bot, interval_seconds=settings.ip_poll_seconds)
     ups_task = UPSMonitorTask(bot, poll_seconds=settings.ups.poll_seconds)
+    updater_cfg = get_updater_config()
+    update_task = UpdateMonitorTask(
+        bot,
+        interval_seconds=int(updater_cfg.get("check_interval_seconds", 21600)),
+    )
 
     started = {"done": False}
 
@@ -62,6 +69,17 @@ async def main_async() -> None:
 
         await ip_task.start()
         await ups_task.start()
+        await update_task.start()
+
+        if bool(updater_cfg.get("enabled", True)) and bool(
+            updater_cfg.get("check_on_startup", True)
+        ):
+            update_cog = bot.get_cog("UpdateCog")
+            if update_cog is not None:
+                try:
+                    await update_cog.notify_if_update_available(source="startup")  # type: ignore[attr-defined]
+                except Exception:
+                    logging.exception("Startup update check failed.")
 
         restart_notice = get_power_restart_notice()
         if restart_notice:

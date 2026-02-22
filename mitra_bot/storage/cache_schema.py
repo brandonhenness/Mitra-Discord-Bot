@@ -301,6 +301,38 @@ class NotificationsConfigModel(BaseModel):
         return out
 
 
+class UpdaterConfigModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = True
+    check_on_startup: bool = True
+    check_interval_seconds: int = 21600
+    github_repo: Optional[str] = None
+    last_checked_epoch: Optional[int] = None
+    last_notified_version: Optional[str] = None
+    pending_version: Optional[str] = None
+    pending_release_url: Optional[str] = None
+    pending_notes: Optional[str] = None
+    pending_notified_epoch: Optional[int] = None
+    installed_version: Optional[str] = None
+
+
+class UpdaterPatchModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Optional[bool] = None
+    check_on_startup: Optional[bool] = None
+    check_interval_seconds: Optional[int] = None
+    github_repo: Optional[str] = None
+    last_checked_epoch: Optional[int] = None
+    last_notified_version: Optional[str] = None
+    pending_version: Optional[str] = None
+    pending_release_url: Optional[str] = None
+    pending_notes: Optional[str] = None
+    pending_notified_epoch: Optional[int] = None
+    installed_version: Optional[str] = None
+
+
 class PowerRestartNoticeModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -400,6 +432,7 @@ class CacheModel(BaseModel):
     todo_config: TodoConfigModel = Field(default_factory=TodoConfigModel)
     cloudflare: CloudflareConfigModel = Field(default_factory=CloudflareConfigModel)
     notifications: NotificationsConfigModel = Field(default_factory=NotificationsConfigModel)
+    updater: UpdaterConfigModel = Field(default_factory=UpdaterConfigModel)
     power_restart_notice: Optional[PowerRestartNoticeModel] = None
 
     @model_validator(mode="before")
@@ -451,6 +484,13 @@ def normalize_cloudflare_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
 
 def normalize_power_restart_notice_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
     model = PowerRestartNoticePatchModel.model_validate(
+        patch if isinstance(patch, dict) else {}
+    )
+    return model.model_dump(mode="json", exclude_none=True)
+
+
+def normalize_updater_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
+    model = UpdaterPatchModel.model_validate(
         patch if isinstance(patch, dict) else {}
     )
     return model.model_dump(mode="json", exclude_none=True)

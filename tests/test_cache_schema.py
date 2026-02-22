@@ -6,6 +6,7 @@ from mitra_bot.storage.cache_schema import (
     normalize_cache_data,
     normalize_notifications_patch,
     normalize_power_restart_notice_patch,
+    normalize_updater_patch,
 )
 
 
@@ -69,6 +70,29 @@ class CacheSchemaTests(unittest.TestCase):
         self.assertEqual(out["message_id"], "3")
         self.assertEqual(out["requested_by_user_id"], "4")
         self.assertEqual(out["confirmed_by_user_id"], "5")
+
+    def test_updater_defaults_exist(self) -> None:
+        out = normalize_cache_data({})
+        self.assertIn("updater", out)
+        self.assertTrue(out["updater"]["enabled"])
+        self.assertTrue(out["updater"]["check_on_startup"])
+        self.assertEqual(out["updater"]["check_interval_seconds"], 21600)
+
+    def test_updater_patch_roundtrip(self) -> None:
+        out = normalize_updater_patch(
+            {
+                "enabled": False,
+                "check_on_startup": False,
+                "check_interval_seconds": 3600,
+                "github_repo": "owner/repo",
+                "last_notified_version": "v1.2.3",
+            }
+        )
+        self.assertFalse(out["enabled"])
+        self.assertFalse(out["check_on_startup"])
+        self.assertEqual(out["check_interval_seconds"], 3600)
+        self.assertEqual(out["github_repo"], "owner/repo")
+        self.assertEqual(out["last_notified_version"], "v1.2.3")
 
 
 if __name__ == "__main__":

@@ -36,16 +36,20 @@ def create_bot(*, state: AppState) -> discord.Bot:
 
 def _register_cogs(bot: discord.Bot) -> None:
     try:
+        from mitra_bot.discord_app.cogs.about_cog import AboutCog
         from mitra_bot.discord_app.cogs.ip_cog import IPCog
         from mitra_bot.discord_app.cogs.power_cog import PowerCog
         from mitra_bot.discord_app.cogs.settings_cog import SettingsCog
         from mitra_bot.discord_app.cogs.todo_cog import TodoCog
+        from mitra_bot.discord_app.cogs.update_cog import UpdateCog
         from mitra_bot.discord_app.cogs.ups_cog import UPSCog
 
+        bot.add_cog(AboutCog(bot))  # type: ignore[arg-type]
         bot.add_cog(IPCog(bot))  # type: ignore[arg-type]
         bot.add_cog(PowerCog(bot))  # type: ignore[arg-type]
         bot.add_cog(SettingsCog(bot))  # type: ignore[arg-type]
         bot.add_cog(TodoCog(bot))  # type: ignore[arg-type]
+        bot.add_cog(UpdateCog(bot))  # type: ignore[arg-type]
         bot.add_cog(UPSCog(bot))  # type: ignore[arg-type]
 
         logging.info("Cogs registered.")

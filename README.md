@@ -15,6 +15,8 @@ It is now a package-based app under `mitra_bot/` with cogs, services, tasks, and
 - Public IP monitoring with Discord notifications.
 - UPS monitoring and `/ups` commands (status, graph, controls).
 - Admin-only `/power` actions (restart, shutdown, cancel) with confirmation UI.
+- GitHub release updater with `/update` commands and admin confirmation UI.
+- `/about` command for runtime/version details.
 - Role-based access (`Mitra Admin` and `Mitra IP Subscriber` by default).
 - Persistent settings via `cache.json`.
 
@@ -104,10 +106,12 @@ py -m mitra_bot.main
 3. Configure your bot token and channel ID (`cache.json` or env vars).
 4. Start the bot.
 5. Use commands:
+   - `/about`
    - `/ip status`
    - `/ip subscribe`
    - `/ups status`
    - `/power restart`, `/power shutdown`, `/power cancel` (admin role required)
+   - `/update check`, `/update install`, `/update changelog` (or `/update changelong`), `/update status`, `/update auto`, `/update startup`, `/update interval`, `/update repo`, `/update dismiss` (admin role required)
 
 ## Notes
 
