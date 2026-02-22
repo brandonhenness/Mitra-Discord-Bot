@@ -632,7 +632,7 @@ class UpdateCog(commands.Cog):
         ctx: discord.ApplicationContext,
         repository: str = discord.Option(
             str,
-            description="Example: brandonhenness/Mitra-Discord-Bot, or auto",
+            description="Example: owner/repo, or auto",
             required=True,
         ),
     ) -> None:

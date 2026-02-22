@@ -87,9 +87,79 @@ def resolve_github_repo() -> Optional[str]:
     return repo
 
 
+def _release_info_from_payload(payload: dict, repo: str) -> Optional[ReleaseInfo]:
+    version = str(payload.get("tag_name") or "").strip()
+    zipball_url = str(payload.get("zipball_url") or "").strip()
+    html_url = str(payload.get("html_url") or "").strip()
+    notes = str(payload.get("body") or "").strip()
+
+    if not version or not zipball_url:
+        return None
+
+    return ReleaseInfo(
+        version=version,
+        zipball_url=zipball_url,
+        html_url=html_url or f"https://github.com/{repo}/releases",
+        notes=notes,
+    )
+
+
+def _fetch_release_payload(repo: str, *, include_prerelease: bool) -> tuple[Optional[dict], Optional[str]]:
+    headers = {"Accept": "application/vnd.github+json"}
+
+    if include_prerelease:
+        api_url = f"https://api.github.com/repos/{repo}/releases"
+        try:
+            response = requests.get(
+                api_url,
+                timeout=20,
+                headers=headers,
+                params={"per_page": 20},
+            )
+            if response.status_code == 404:
+                return None, (
+                    f"Repository `{repo}` not found or inaccessible. "
+                    "Use /update repo to set the correct owner/name."
+                )
+            response.raise_for_status()
+            payloads = response.json()
+        except Exception as exc:
+            return None, f"Failed to check releases: {exc}"
+
+        if not isinstance(payloads, list):
+            return None, "Unexpected releases response format from GitHub."
+
+        for payload in payloads:
+            if not isinstance(payload, dict):
+                continue
+            if bool(payload.get("draft", False)):
+                continue
+            return payload, None
+        return None, "No published releases were found."
+
+    api_url = f"https://api.github.com/repos/{repo}/releases/latest"
+    try:
+        response = requests.get(
+            api_url,
+            timeout=20,
+            headers=headers,
+        )
+        if response.status_code == 404:
+            return None, (
+                f"No stable published release found for `{repo}`. "
+                "If you only publish pre-releases, run /update beta enabled:true."
+            )
+        response.raise_for_status()
+        return response.json(), None
+    except Exception as exc:
+        return None, f"Failed to check latest release: {exc}"
+
+
 def check_latest_release() -> UpdateCheckResult:
     current_version = get_current_version()
     repo = resolve_github_repo()
+    cfg = get_updater_config()
+    include_prerelease = bool(cfg.get("include_prerelease", False))
     now_epoch = int(time.time())
     set_updater_config({"last_checked_epoch": now_epoch})
 
@@ -103,47 +173,43 @@ def check_latest_release() -> UpdateCheckResult:
             error="Could not determine GitHub repository.",
         )
 
-    api_url = f"https://api.github.com/repos/{repo}/releases/latest"
-    try:
-        response = requests.get(
-            api_url,
-            timeout=20,
-            headers={"Accept": "application/vnd.github+json"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception as exc:
-        return UpdateCheckResult(
-            current_version=current_version,
-            latest_version=None,
-            available=False,
-            release=None,
-            repo=repo,
-            error=f"Failed to check latest release: {exc}",
-        )
-
-    latest_version = str(payload.get("tag_name") or "").strip()
-    zipball_url = str(payload.get("zipball_url") or "").strip()
-    html_url = str(payload.get("html_url") or "").strip()
-    notes = str(payload.get("body") or "").strip()
-
-    if not latest_version or not zipball_url:
-        return UpdateCheckResult(
-            current_version=current_version,
-            latest_version=None,
-            available=False,
-            release=None,
-            repo=repo,
-            error="Latest release response is missing required fields.",
-        )
-
-    available = _clean_version(latest_version) != _clean_version(current_version)
-    release = ReleaseInfo(
-        version=latest_version,
-        zipball_url=zipball_url,
-        html_url=html_url or f"https://github.com/{repo}/releases/latest",
-        notes=notes,
+    payload, error = _fetch_release_payload(
+        repo,
+        include_prerelease=include_prerelease,
     )
+    if error:
+        return UpdateCheckResult(
+            current_version=current_version,
+            latest_version=None,
+            available=False,
+            release=None,
+            repo=repo,
+            error=error,
+        )
+
+    if payload is None:
+        return UpdateCheckResult(
+            current_version=current_version,
+            latest_version=None,
+            available=False,
+            release=None,
+            repo=repo,
+            error="No release payload available from GitHub.",
+        )
+
+    release = _release_info_from_payload(payload, repo)
+    if release is None:
+        return UpdateCheckResult(
+            current_version=current_version,
+            latest_version=None,
+            available=False,
+            release=None,
+            repo=repo,
+            error="Release response is missing required fields.",
+        )
+
+    latest_version = release.version
+    available = _clean_version(latest_version) != _clean_version(current_version)
     return UpdateCheckResult(
         current_version=current_version,
         latest_version=latest_version,
