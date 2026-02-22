@@ -142,9 +142,13 @@ class UpdateCog(commands.Cog):
                 inline=True,
             )
             if check.repo:
-                embed.add_field(name="Repository", value=f"`{check.repo}`", inline=False)
+                embed.add_field(
+                    name="Repository", value=f"`{check.repo}`", inline=False
+                )
             if check.error:
-                embed.add_field(name="Error", value=_trim(check.error, 300), inline=False)
+                embed.add_field(
+                    name="Error", value=_trim(check.error, 300), inline=False
+                )
 
         if release is not None:
             embed.add_field(name="Version", value=f"`{release.version}`", inline=True)
@@ -176,7 +180,9 @@ class UpdateCog(commands.Cog):
             if isinstance(ch, (discord.TextChannel, discord.Thread)):
                 return ch
 
-        legacy_channel_id = getattr(getattr(self.bot, "state", None), "channel_id", None)
+        legacy_channel_id = getattr(
+            getattr(self.bot, "state", None), "channel_id", None
+        )
         if legacy_channel_id:
             ch = self.bot.get_channel(int(legacy_channel_id))
             if ch is None:
@@ -223,7 +229,9 @@ class UpdateCog(commands.Cog):
 
         channel = await self._find_announce_channel()
         if channel is None:
-            logging.info("Update is available but no notification channel is configured.")
+            logging.info(
+                "Update is available but no notification channel is configured."
+            )
             return
 
         embed = self.build_embed(
@@ -248,7 +256,9 @@ class UpdateCog(commands.Cog):
             )
             return
 
-        await origin_message.channel.send("Update installed. Restarting bot process now.")
+        await origin_message.channel.send(
+            "Update installed. Restarting bot process now."
+        )
         await self.bot.close()
         os._exit(0)
 
@@ -457,10 +467,17 @@ class UpdateCog(commands.Cog):
 
         cfg = get_updater_config()
         embed = discord.Embed(title="Updater Status", color=discord.Color.blurple())
-        embed.add_field(name="Enabled", value=f"`{bool(cfg.get('enabled', True))}`", inline=True)
+        embed.add_field(
+            name="Enabled", value=f"`{bool(cfg.get('enabled', True))}`", inline=True
+        )
         embed.add_field(
             name="Startup Check",
             value=f"`{bool(cfg.get('check_on_startup', True))}`",
+            inline=True,
+        )
+        embed.add_field(
+            name="Beta Releases",
+            value=f"`{bool(cfg.get('include_prerelease', False))}`",
             inline=True,
         )
         embed.add_field(
@@ -513,6 +530,44 @@ class UpdateCog(commands.Cog):
         set_updater_config({"enabled": enabled})
         await ctx.respond(
             f"Automatic update checks are now {'enabled' if enabled else 'disabled'}.",
+            ephemeral=True,
+        )
+
+    @update.command(
+        name="beta",
+        description="Enable/disable beta (pre-release) update channel (admins only).",
+    )
+    async def beta(
+        self,
+        ctx: discord.ApplicationContext,
+        enabled: bool = discord.Option(
+            bool,
+            description="Set true to include pre-releases, false for stable-only.",
+            required=True,
+        ),
+    ) -> None:
+        admin_guard = ensure_admin(ctx)
+        if admin_guard:
+            await admin_guard
+            return
+
+        set_updater_config(
+            {
+                "include_prerelease": enabled,
+                "last_notified_version": None,
+                "pending_version": None,
+                "pending_release_url": None,
+                "pending_notes": None,
+                "pending_notified_epoch": None,
+            }
+        )
+        await ctx.respond(
+            (
+                "Updater now includes pre-releases."
+                if enabled
+                else "Updater is now stable-only (pre-releases disabled)."
+            )
+            + " Run `/update check` to refresh availability.",
             ephemeral=True,
         )
 
@@ -575,7 +630,7 @@ class UpdateCog(commands.Cog):
         ctx: discord.ApplicationContext,
         repository: str = discord.Option(
             str,
-            description="Example: Henness0666/Mitra-Discord-Bot, or auto",
+            description="Example: brandonhenness/Mitra-Discord-Bot, or auto",
             required=True,
         ),
     ) -> None:
