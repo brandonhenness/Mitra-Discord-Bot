@@ -17,7 +17,7 @@ from mitra_bot.services.update_service import (
     install_release,
     spawn_replacement_process,
 )
-from mitra_bot.storage.cache_store import (
+from mitra_bot.storage.storage_store import (
     get_notification_channel_map,
     get_updater_config,
     set_updater_config,

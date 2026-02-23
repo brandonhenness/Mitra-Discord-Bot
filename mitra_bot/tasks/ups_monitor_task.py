@@ -7,7 +7,7 @@ import discord
 from discord.ext import tasks
 
 from mitra_bot.services.notifier import Notifier
-from mitra_bot.storage.cache_store import read_cache_with_defaults, set_ups_config
+from mitra_bot.storage.storage_store import read_storage_with_defaults, set_ups_config
 
 
 class UPSMonitorTask:
@@ -21,7 +21,7 @@ class UPSMonitorTask:
 
     @tasks.loop(seconds=30)
     async def loop(self) -> None:
-        cfg = read_cache_with_defaults()
+        cfg = read_storage_with_defaults()
         ups_cfg = cfg.get("ups", {}) if isinstance(cfg.get("ups"), dict) else {}
 
         if not bool(ups_cfg.get("enabled", True)):

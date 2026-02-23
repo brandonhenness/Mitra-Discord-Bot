@@ -16,7 +16,7 @@ from typing import Optional
 import requests
 
 from mitra_bot import __version__
-from mitra_bot.storage.cache_store import get_updater_config, set_updater_config
+from mitra_bot.storage.storage_store import get_updater_config, set_updater_config
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _GITHUB_REMOTE_RE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+)(?:\.git)?$")
@@ -225,7 +225,12 @@ def _copy_release_tree(source_root: Path, target_root: Path) -> None:
         ".ruff_cache",
         ".pytest_cache",
         ".mypy_cache",
-        "cache.json",
+        ".env",
+        ".env.production",
+        "config.toml",
+        "state.db",
+        "state.db-shm",
+        "state.db-wal",
         "bot.log",
     }
     for src in source_root.iterdir():
@@ -245,6 +250,31 @@ def _copy_release_tree(source_root: Path, target_root: Path) -> None:
 
 def _install_requirements() -> None:
     req = PROJECT_ROOT / "requirements.txt"
+    pyproject = PROJECT_ROOT / "pyproject.toml"
+
+    if pyproject.exists():
+        uv = shutil.which("uv")
+        if uv:
+            cmd = [uv, "sync", "--no-dev", "--frozen"]
+            subprocess.run(
+                cmd,
+                cwd=PROJECT_ROOT,
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            return
+
+        cmd = [sys.executable, "-m", "pip", "install", "-e", str(PROJECT_ROOT)]
+        subprocess.run(
+            cmd,
+            cwd=PROJECT_ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        return
+
     if not req.exists():
         return
 

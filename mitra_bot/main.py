@@ -9,8 +9,8 @@ from typing import Any
 import discord
 from mitra_bot.discord_app.bot_factory import AppState, create_bot
 from mitra_bot.logging_setup import setup_logging
-from mitra_bot.storage.cache_schema import RestartNoticeRuntimeModel
-from mitra_bot.storage.cache_store import (
+from mitra_bot.storage.storage_schema import RestartNoticeRuntimeModel
+from mitra_bot.storage.storage_store import (
     clear_power_restart_notice,
     get_notification_channel_map,
     get_power_restart_notice,
@@ -251,7 +251,7 @@ async def main_async() -> None:
             logging.info("Configured notify channels per guild: %s", rendered)
         elif settings.channel_id:
             logging.info(
-                "Configured legacy notify channel id: %s (from channel/channel_id)",
+                "Configured global fallback notify channel id from config.toml: %s",
                 settings.channel_id,
             )
         else:

@@ -13,7 +13,7 @@ from mitra_bot.services.ups.tripplite_client import TrippliteUPSClient
 from mitra_bot.services.ups.ups_log import UPSLogStore
 from mitra_bot.services.ups.ups_graph import build_ups_status_graph
 from mitra_bot.services.ups.ups_service import UPSConfig, UPSService
-from mitra_bot.storage.cache_store import get_ups_config, set_ups_config
+from mitra_bot.storage.storage_store import get_ups_config, set_ups_config
 
 
 def _fmt_seconds(seconds: Optional[int]) -> str:

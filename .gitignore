@@ -1,6 +1,8 @@
 /config.py
 data.json
-cache.json
+config.toml
+state.db
+state.db-*
 
 
 # Byte-compiled / optimized / DLL files
@@ -134,6 +136,9 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
+!.env.production.example
 .venv
 env/
 venv/

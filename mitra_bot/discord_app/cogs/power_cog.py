@@ -10,7 +10,7 @@ from discord.ext import commands
 
 from mitra_bot.discord_app.checks import ensure_admin
 from mitra_bot.services.power_service import execute_power_action
-from mitra_bot.storage.cache_store import (
+from mitra_bot.storage.storage_store import (
     clear_power_restart_notice,
     set_power_restart_notice,
 )

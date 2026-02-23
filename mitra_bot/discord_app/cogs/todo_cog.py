@@ -18,7 +18,7 @@ from mitra_bot.discord_app.cogs.todo_common import (
     to_raw as _to_raw,
 )
 
-from mitra_bot.storage.cache_store import (
+from mitra_bot.storage.storage_store import (
     clear_todo_hub_message_id_for_guild,
     clear_todo_list_board_message_id,
     clear_todo_tasks_for_list_channel,

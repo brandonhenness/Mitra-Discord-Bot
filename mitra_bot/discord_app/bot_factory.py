@@ -19,7 +19,7 @@ class AppState:
 def create_bot(*, state: AppState) -> discord.Bot:
     intents = discord.Intents.default()
     intents.guilds = True
-    intents.members = os.getenv("MITRA_ENABLE_MEMBERS_INTENT", "").strip().lower() in {
+    intents.members = os.getenv("MITRA_ENABLE_MEMBERS_INTENT", "true").strip().lower() in {
         "1",
         "true",
         "yes",

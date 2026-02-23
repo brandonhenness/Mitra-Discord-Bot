@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mitra_bot.services.cloudflare_service import CloudflareService
 from mitra_bot.services.ip_service import get_public_ip
-from mitra_bot.storage.cache_store import get_cloudflare_config, load_ip
+from mitra_bot.storage.storage_store import get_cloudflare_config, load_ip
 
 
 class CloudflareDNSUpdateConfig(BaseModel):
@@ -22,8 +22,6 @@ class CloudflareDNSUpdateConfig(BaseModel):
     zone_id: str = ""
     record_ids: list[str] = Field(default_factory=list)
     api_token: str = ""
-    api_key: str = ""
-    email: str = ""
 
     @field_validator("enabled", mode="before")
     @classmethod
@@ -33,10 +31,10 @@ class CloudflareDNSUpdateConfig(BaseModel):
             return True
         return bool(value)
 
-    @field_validator("zone_id", "api_token", "api_key", "email", mode="before")
+    @field_validator("zone_id", "api_token", mode="before")
     @classmethod
     def _coerce_optional_str(cls, value: object) -> str:
-        # Legacy cache entries may contain null for unset string fields.
+        # Normalize optional string fields.
         if value is None:
             return ""
         return str(value)
@@ -55,13 +53,11 @@ class CloudflareDNSUpdateConfig(BaseModel):
         self.zone_id = self.zone_id.strip()
         self.record_ids = [str(x).strip() for x in self.record_ids if str(x).strip()]
         self.api_token = self.api_token.strip()
-        self.api_key = self.api_key.strip()
-        self.email = self.email.strip()
         return self
 
     @property
     def has_auth(self) -> bool:
-        return bool(self.api_token) or bool(self.api_key and self.email)
+        return bool(self.api_token)
 
 
 class IPMonitorTask:
@@ -79,7 +75,7 @@ class IPMonitorTask:
         self.loop.change_interval(seconds=self.interval_seconds)
 
     async def start(self) -> None:
-        # load last ip from cache
+        # Load last observed IP from persistent state.
         self._last_ip = await load_ip()
         if not self._last_ip:
             logging.info("No cached IP found.")
@@ -95,7 +91,7 @@ class IPMonitorTask:
         cfg = CloudflareDNSUpdateConfig.model_validate(raw_cfg)
 
         if not cfg.enabled:
-            logging.info("Cloudflare DNS update is disabled in cache config.")
+            logging.info("Cloudflare DNS update is disabled in config.")
             return
 
         if not cfg.zone_id:
@@ -108,7 +104,7 @@ class IPMonitorTask:
 
         if not cfg.has_auth:
             logging.warning(
-                "Cloudflare config needs api_token or api_key+email; skipping DNS update."
+                "Cloudflare config needs api_token; skipping DNS update."
             )
             return
 
@@ -116,8 +112,6 @@ class IPMonitorTask:
 
         service = CloudflareService(
             api_token=cfg.api_token or None,
-            api_key=cfg.api_key or None,
-            email=cfg.email or None,
         )
         records = await asyncio.to_thread(service.get_dns_records, cfg.zone_id)
         records_by_id = {str(r.get("id", "")): r for r in records}

@@ -1,0 +1,23 @@
+[bot]
+ip_poll_seconds = 900
+admin_role_name = "Mitra Admin"
+ip_subscriber_role_name = "Mitra IP Subscriber"
+
+[ups]
+enabled = true
+poll_seconds = 30
+warn_time_to_empty_seconds = 600
+critical_time_to_empty_seconds = 180
+auto_shutdown_enabled = false
+auto_shutdown_action = "shutdown"
+auto_shutdown_delay_seconds = 0
+auto_shutdown_force = false
+log_enabled = true
+log_file = "ups_stats.jsonl"
+graph_default_hours = 6
+timezone = "UTC"
+
+[cloudflare]
+enabled = false
+zone_id = ""
+record_ids = []

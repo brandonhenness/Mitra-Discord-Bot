@@ -74,13 +74,11 @@ class CloudflarePatchModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_token: Optional[str] = None
-    api_key: Optional[str] = None
-    email: Optional[str] = None
     zone_id: Optional[str] = None
     record_ids: Optional[list[str]] = None
     enabled: Optional[bool] = None
 
-    @field_validator("api_token", "api_key", "email", "zone_id", mode="before")
+    @field_validator("api_token", "zone_id", mode="before")
     @classmethod
     def _coerce_optional_str(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -262,8 +260,6 @@ class CloudflareConfigModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     api_token: Optional[str] = None
-    api_key: Optional[str] = None
-    email: Optional[str] = None
     zone_id: Optional[str] = None
     record_ids: list[str] = Field(default_factory=list)
     enabled: Optional[bool] = None
@@ -427,7 +423,7 @@ class PowerRestartNoticePatchModel(BaseModel):
         return _snowflake_str(value)
 
 
-class CacheModel(BaseModel):
+class StorageModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     ups: UPSConfigModel = Field(default_factory=UPSConfigModel)
@@ -445,7 +441,7 @@ class CacheModel(BaseModel):
         cloudflare = data.get("cloudflare")
         if not isinstance(cloudflare, dict):
             cloudflare = {}
-        for key in ("api_token", "api_key", "email", "zone_id", "record_ids", "enabled"):
+        for key in ("api_token", "zone_id", "record_ids", "enabled"):
             if key not in cloudflare and key in data:
                 cloudflare[key] = data.get(key)
         data["cloudflare"] = cloudflare
@@ -460,8 +456,8 @@ class CacheModel(BaseModel):
         return data
 
 
-def normalize_cache_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    model = CacheModel.model_validate(data if isinstance(data, dict) else {})
+def normalize_storage_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    model = StorageModel.model_validate(data if isinstance(data, dict) else {})
     return model.model_dump(mode="json", exclude_none=False)
 
 

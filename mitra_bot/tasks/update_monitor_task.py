@@ -5,7 +5,7 @@ import logging
 import discord
 from discord.ext import tasks
 
-from mitra_bot.storage.cache_store import get_updater_config
+from mitra_bot.storage.storage_store import get_updater_config
 
 
 class UpdateMonitorTask:
