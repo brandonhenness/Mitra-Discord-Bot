@@ -9,7 +9,7 @@ from discord.ext import commands
 from mitra_bot.services.ip_service import get_public_ip
 from mitra_bot.services.notifier import Notifier
 from mitra_bot.services.role_manager import ensure_role
-from mitra_bot.storage.cache_store import (
+from mitra_bot.storage.storage_store import (
     get_notification_channel_id_for_guild,
     save_ip,
 )

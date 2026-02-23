@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.24.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mitra-discord-bot"
+version = "0.1.0"
+description = "Mitra Discord bot for home/server operations monitoring and controls."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+dependencies = [
+    "py-cord>=2.4,<3",
+    "aiohttp>=3.8,<4",
+    "requests>=2.31,<3",
+    "tripplite>=0.4,<1",
+    "matplotlib>=3.7,<4",
+    "tzdata>=2023.3",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.3,<3",
+    "tomli-w>=1.0,<2",
+    "tomli>=2.0,<3; python_version < '3.11'",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9,<10",
+]
+
+[project.scripts]
+mitra-bot = "mitra_bot.main:main"
+mitra-init-config = "mitra_bot.init_config:main"
+mitra-init = "mitra_bot.init_config:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mitra_bot"]

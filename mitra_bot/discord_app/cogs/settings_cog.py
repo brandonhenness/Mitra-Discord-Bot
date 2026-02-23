@@ -5,7 +5,7 @@ from discord.ext import commands
 from pydantic import BaseModel, ConfigDict, Field
 
 from mitra_bot.discord_app.checks import ensure_admin
-from mitra_bot.storage.cache_store import (
+from mitra_bot.storage.storage_store import (
     clear_notification_channel_id_for_guild,
     get_notification_channel_id_for_guild,
     set_notification_channel_id_for_guild,

@@ -13,7 +13,7 @@ from mitra_bot.services.ups.tripplite_client import TrippliteUPSClient
 from mitra_bot.services.ups.ups_log import UPSLogStore
 from mitra_bot.services.ups.ups_graph import build_ups_status_graph
 from mitra_bot.services.ups.ups_service import UPSConfig, UPSService
-from mitra_bot.storage.cache_store import get_ups_config, set_ups_config
+from mitra_bot.storage.storage_store import get_ups_config, set_ups_config
 
 
 def _fmt_seconds(seconds: Optional[int]) -> str:
@@ -236,23 +236,25 @@ class UPSCog(commands.Cog):
         self.service.config = self._build_service_config(ups_cfg)
         return ups_cfg
 
-    @ups.command(name="enable", description="Enable UPS monitoring")
-    async def enable(self, ctx: discord.ApplicationContext):
+    @ups.command(name="monitoring", description="Enable or disable UPS monitoring")
+    async def monitoring(
+        self,
+        ctx: discord.ApplicationContext,
+        enabled: bool = discord.Option(
+            bool,
+            description="Set true to enable monitoring, false to disable.",
+            required=True,
+        ),
+    ):
         if ensure_admin(ctx):
             return
 
-        set_ups_config({"enabled": True})
+        set_ups_config({"enabled": bool(enabled)})
         self._reload_from_cache()
-        await ctx.respond("UPS monitoring enabled.", ephemeral=True)
-
-    @ups.command(name="disable", description="Disable UPS monitoring")
-    async def disable(self, ctx: discord.ApplicationContext):
-        if ensure_admin(ctx):
-            return
-
-        set_ups_config({"enabled": False})
-        self._reload_from_cache()
-        await ctx.respond("UPS monitoring disabled.", ephemeral=True)
+        await ctx.respond(
+            f"UPS monitoring {'enabled' if enabled else 'disabled'}.",
+            ephemeral=True,
+        )
 
     @ups.command(
         name="timezone", description="Set the timezone for UPS graph timestamps"

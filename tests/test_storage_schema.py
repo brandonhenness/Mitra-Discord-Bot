@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import unittest
 
-from mitra_bot.storage.cache_schema import (
-    normalize_cache_data,
+from pydantic import ValidationError
+
+from mitra_bot.storage.storage_schema import (
+    normalize_storage_data,
+    normalize_cloudflare_patch,
     normalize_notifications_patch,
     normalize_power_restart_notice_patch,
+    normalize_updater_patch,
 )
 
 
-class CacheSchemaTests(unittest.TestCase):
-    def test_normalize_cache_data_converts_snowflakes_to_strings(self) -> None:
-        out = normalize_cache_data(
+class StorageSchemaTests(unittest.TestCase):
+    def test_normalize_storage_data_converts_snowflakes_to_strings(self) -> None:
+        out = normalize_storage_data(
             {
                 "notifications": {"guild_channels": {1246058921739817030: 1474199874982510800}},
                 "todo_config": {
@@ -69,6 +73,42 @@ class CacheSchemaTests(unittest.TestCase):
         self.assertEqual(out["message_id"], "3")
         self.assertEqual(out["requested_by_user_id"], "4")
         self.assertEqual(out["confirmed_by_user_id"], "5")
+
+    def test_updater_defaults_exist(self) -> None:
+        out = normalize_storage_data({})
+        self.assertIn("updater", out)
+        self.assertTrue(out["updater"]["enabled"])
+        self.assertFalse(out["updater"]["include_prerelease"])
+        self.assertTrue(out["updater"]["check_on_startup"])
+        self.assertEqual(out["updater"]["check_interval_seconds"], 21600)
+
+    def test_updater_patch_roundtrip(self) -> None:
+        out = normalize_updater_patch(
+            {
+                "enabled": False,
+                "include_prerelease": True,
+                "check_on_startup": False,
+                "check_interval_seconds": 3600,
+                "github_repo": "owner/repo",
+                "last_notified_version": "v1.2.3",
+            }
+        )
+        self.assertFalse(out["enabled"])
+        self.assertTrue(out["include_prerelease"])
+        self.assertFalse(out["check_on_startup"])
+        self.assertEqual(out["check_interval_seconds"], 3600)
+        self.assertEqual(out["github_repo"], "owner/repo")
+        self.assertEqual(out["last_notified_version"], "v1.2.3")
+
+    def test_cloudflare_patch_accepts_token_only(self) -> None:
+        out = normalize_cloudflare_patch({"api_token": "x", "zone_id": "z", "record_ids": ["r"]})
+        self.assertEqual(out["api_token"], "x")
+        self.assertEqual(out["zone_id"], "z")
+        self.assertEqual(out["record_ids"], ["r"])
+
+    def test_cloudflare_patch_rejects_removed_alias_fields(self) -> None:
+        with self.assertRaises(ValidationError):
+            normalize_cloudflare_patch({"api_key": "old", "email": "old@example.com"})
 
 
 if __name__ == "__main__":

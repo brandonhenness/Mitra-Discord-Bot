@@ -54,8 +54,13 @@ class TrippliteUPSClient:
             raise RuntimeError("tripplite library is not installed.")
 
         if self._battery is None:
-            self._battery = Battery()
-            self._battery.open()
+            try:
+                self._battery = Battery()
+                self._battery.open()
+            except OSError as exc:
+                if _is_no_ups_connected_error(exc):
+                    raise RuntimeError("No UPS connected.") from exc
+                raise
 
     def close(self) -> None:
         if self._battery is None:
@@ -90,3 +95,18 @@ class TrippliteUPSClient:
             self._battery.open()
             raw = self._battery.get()
             return UPSRawStatusModel.model_validate(raw).model_dump(mode="json")
+
+
+def _is_no_ups_connected_error(exc: Exception) -> bool:
+    text = str(exc).strip().lower()
+    if not text:
+        return False
+    markers = (
+        "no ups connected",
+        "could not find any connected tripplite devices",
+        "could not find any connected",
+        "no connected",
+        "device not found",
+        "cannot find",
+    )
+    return any(marker in text for marker in markers)

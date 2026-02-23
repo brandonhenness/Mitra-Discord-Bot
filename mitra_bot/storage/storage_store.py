@@ -1,48 +1,93 @@
-# mitra_bot/storage/cache_store.py
+# mitra_bot/storage/storage_store.py
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
+import os
 from typing import Any, Dict, Optional, Set
 
-from mitra_bot.storage.cache_repository import CacheRepository
-from mitra_bot.storage.cache_schema import (
-    normalize_cache_data,
+from mitra_bot.storage.config_store import (
+    ensure_config_file,
+    read_config_dict,
+    write_config_dict,
+)
+from mitra_bot.storage.storage_schema import (
+    normalize_storage_data,
     normalize_cloudflare_patch,
     normalize_notifications_patch,
     normalize_power_restart_notice_patch,
+    normalize_updater_patch,
     normalize_ups_patch,
 )
+from mitra_bot.storage.state_store import get_state_store
 
-CACHE_PATH = Path("cache.json")
-_CACHE_REPO = CacheRepository(CACHE_PATH, normalize_cache_data)
+_STATE_KEYS = {
+    "admins",
+    "subscribers",
+    "ip",
+    "notifications",
+    "updater",
+    "power_restart_notice",
+    "todo",
+    "todo_config",
+}
 
 
-def read_cache_json() -> Dict[str, Any]:
-    return _CACHE_REPO.read_raw()
+def _build_combined_snapshot() -> Dict[str, Any]:
+    cfg = read_config_dict()
+    bot = cfg.get("bot", {})
+    combined: Dict[str, Any] = {
+        "channel_id": bot.get("channel_id"),
+        "ip_poll_seconds": bot.get("ip_poll_seconds", 900),
+        "admin_role_name": bot.get("admin_role_name", "Mitra Admin"),
+        "ip_subscriber_role_name": bot.get("ip_subscriber_role_name", "Mitra IP Subscriber"),
+        "ups": cfg.get("ups", {}),
+        "cloudflare": cfg.get("cloudflare", {}),
+    }
+    combined.update(get_state_store().read_all())
+    return combined
 
 
-def write_cache_json(data: Dict[str, Any]) -> None:
-    _CACHE_REPO.write(data)
+def read_storage_json() -> Dict[str, Any]:
+    ensure_config_file()
+    return normalize_storage_data(_build_combined_snapshot())
 
 
-def read_cache_with_defaults() -> Dict[str, Any]:
+def write_storage_json(data: Dict[str, Any]) -> None:
+    ensure_config_file()
+    normalized = normalize_storage_data(data if isinstance(data, dict) else {})
+    cfg = read_config_dict()
+
+    cfg["bot"] = {
+        "channel_id": normalized.get("channel_id") or normalized.get("channel"),
+        "ip_poll_seconds": int(normalized.get("ip_poll_seconds", 900)),
+        "admin_role_name": str(normalized.get("admin_role_name", "Mitra Admin")),
+        "ip_subscriber_role_name": str(normalized.get("ip_subscriber_role_name", "Mitra IP Subscriber")),
+    }
+    cfg["ups"] = normalized.get("ups", {})
+    cloudflare = normalized.get("cloudflare", {})
+    cfg["cloudflare"] = {
+        "enabled": bool(cloudflare.get("enabled", False)),
+        "zone_id": cloudflare.get("zone_id"),
+        "record_ids": cloudflare.get("record_ids", []) if isinstance(cloudflare.get("record_ids"), list) else [],
+    }
+    write_config_dict(cfg)
+
+    store = get_state_store()
+    for key in _STATE_KEYS:
+        if key in normalized:
+            store.set_json(key, normalized.get(key))
+        else:
+            store.delete_key(key)
+
+
+def read_storage_with_defaults() -> Dict[str, Any]:
     """
-    Load cache.json and apply schema defaults/migrations. Writes back if updated.
+    Load combined config/state snapshot and apply schema defaults.
     """
-    data = _CACHE_REPO.read_raw()
-    before = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-    data = normalize_cache_data(data)
-
-    after = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    if after != before:
-        try:
-            _CACHE_REPO.write(data)
-        except Exception:
-            logging.exception("Failed to write cache defaults to cache.json")
-
+    ensure_config_file()
+    data = read_storage_json()
+    # Ensure defaults persist to config/state stores.
+    write_storage_json(data)
     return data
 
 
@@ -51,7 +96,7 @@ def read_cache_with_defaults() -> Dict[str, Any]:
 # -----------------------------
 
 def load_admins() -> Set[int]:
-    data = read_cache_json()
+    data = read_storage_json()
     admins_list = data.get("admins", [])
     out: Set[int] = set()
     for x in admins_list:
@@ -64,23 +109,23 @@ def load_admins() -> Set[int]:
 
 def load_subscribers() -> Set[int]:
     try:
-        logging.info("Loading subscribers from cache file...")
-        data = read_cache_json()
+        logging.info("Loading subscribers from state store...")
+        data = read_storage_json()
         if "subscribers" not in data:
-            logging.warning("No subscribers found in cache file.")
+            logging.warning("No subscribers found in state store.")
             return set()
         return set(data.get("subscribers", []))
     except Exception:
-        logging.exception("Failed to load subscribers from cache.json")
+        logging.exception("Failed to load subscribers from state store")
         return set()
 
 
 async def save_subscribers(subscribers_set: Set[int]) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     data["subscribers"] = list(subscribers_set)
-    write_cache_json(data)
+    write_storage_json(data)
     logging.info(
-        "Subscribers saved to cache file: %s",
+        "Subscribers saved to state store: %s",
         ", ".join([str(s) for s in subscribers_set]),
     )
 
@@ -91,18 +136,18 @@ async def save_subscribers(subscribers_set: Set[int]) -> None:
 
 async def load_ip() -> Optional[str]:
     try:
-        data = read_cache_json()
+        data = read_storage_json()
         return data.get("ip")
     except Exception:
-        logging.exception("Failed to load ip from cache.json")
+        logging.exception("Failed to load ip from state store")
         return None
 
 
 async def save_ip(ip: str) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     data["ip"] = ip
-    write_cache_json(data)
-    logging.info("IP address saved to cache file: %s", ip)
+    write_storage_json(data)
+    logging.info("IP address saved to state store: %s", ip)
 
 
 # -----------------------------
@@ -110,7 +155,7 @@ async def save_ip(ip: str) -> None:
 # -----------------------------
 
 def get_ups_config() -> Dict[str, Any]:
-    data = read_cache_with_defaults()
+    data = read_storage_with_defaults()
     ups = data.get("ups", {})
     return ups if isinstance(ups, dict) else {}
 
@@ -120,36 +165,42 @@ def set_ups_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     Patch UPS config keys and persist. Returns the new UPS config dict.
     """
     parsed_patch = normalize_ups_patch(patch)
-    data = read_cache_with_defaults()
+    data = read_storage_with_defaults()
     ups = data.get("ups", {})
     if not isinstance(ups, dict):
         ups = {}
     ups.update(parsed_patch)
     data["ups"] = ups
-    write_cache_json(data)
+    write_storage_json(data)
     return ups
 
 
 def get_cloudflare_config() -> Dict[str, Any]:
-    data = read_cache_with_defaults()
+    data = read_storage_with_defaults()
     cfg = data.get("cloudflare", {})
-    return cfg if isinstance(cfg, dict) else {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    # Secrets are env-only by design.
+    api_token = os.getenv("CLOUDFLARE_API_TOKEN")
+    if api_token:
+        cfg["api_token"] = api_token
+    return cfg
 
 
 def set_cloudflare_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     parsed_patch = normalize_cloudflare_patch(patch)
-    data = read_cache_with_defaults()
+    data = read_storage_with_defaults()
     cloudflare = data.get("cloudflare", {})
     if not isinstance(cloudflare, dict):
         cloudflare = {}
     cloudflare.update(parsed_patch)
     data["cloudflare"] = cloudflare
-    write_cache_json(data)
+    write_storage_json(data)
     return cloudflare
 
 
 def get_notification_channel_id_for_guild(guild_id: int) -> Optional[int]:
-    data = read_cache_with_defaults()
+    data = read_storage_with_defaults()
     notifications = data.get("notifications", {})
     if not isinstance(notifications, dict):
         notifications = {}
@@ -165,7 +216,7 @@ def get_notification_channel_id_for_guild(guild_id: int) -> Optional[int]:
 
 
 def set_notification_channel_id_for_guild(guild_id: int, channel_id: int) -> None:
-    data = read_cache_with_defaults()
+    data = read_storage_with_defaults()
     notifications = data.get("notifications", {})
     if not isinstance(notifications, dict):
         notifications = {}
@@ -177,11 +228,11 @@ def set_notification_channel_id_for_guild(guild_id: int, channel_id: int) -> Non
     patch = normalize_notifications_patch({"guild_channels": guild_channels})
     notifications.update(patch)
     data["notifications"] = notifications
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def clear_notification_channel_id_for_guild(guild_id: int) -> None:
-    data = read_cache_with_defaults()
+    data = read_storage_with_defaults()
     notifications = data.get("notifications", {})
     if not isinstance(notifications, dict):
         notifications = {}
@@ -193,11 +244,11 @@ def clear_notification_channel_id_for_guild(guild_id: int) -> None:
     patch = normalize_notifications_patch({"guild_channels": guild_channels})
     notifications.update(patch)
     data["notifications"] = notifications
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def get_notification_channel_map() -> Dict[int, int]:
-    data = read_cache_with_defaults()
+    data = read_storage_with_defaults()
     notifications = data.get("notifications", {})
     if not isinstance(notifications, dict):
         return {}
@@ -215,26 +266,48 @@ def get_notification_channel_map() -> Dict[int, int]:
 
 
 # -----------------------------
+# Updater helpers
+# -----------------------------
+
+def get_updater_config() -> Dict[str, Any]:
+    data = read_storage_with_defaults()
+    updater = data.get("updater", {})
+    return updater if isinstance(updater, dict) else {}
+
+
+def set_updater_config(patch: Dict[str, Any]) -> Dict[str, Any]:
+    parsed_patch = normalize_updater_patch(patch)
+    data = read_storage_with_defaults()
+    updater = data.get("updater", {})
+    if not isinstance(updater, dict):
+        updater = {}
+    updater.update(parsed_patch)
+    data["updater"] = updater
+    write_storage_json(data)
+    return updater
+
+
+# -----------------------------
 # Power action helpers
 # -----------------------------
 
 def get_power_restart_notice() -> Optional[Dict[str, Any]]:
-    data = read_cache_json()
+    data = read_storage_json()
     notice = data.get("power_restart_notice")
     return notice if isinstance(notice, dict) else None
 
 
 def set_power_restart_notice(notice: Dict[str, Any]) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     data["power_restart_notice"] = normalize_power_restart_notice_patch(notice)
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def clear_power_restart_notice() -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     if "power_restart_notice" in data:
         del data["power_restart_notice"]
-        write_cache_json(data)
+        write_storage_json(data)
 
 
 # -----------------------------
@@ -242,7 +315,7 @@ def clear_power_restart_notice() -> None:
 # -----------------------------
 
 def get_todos_for_guild(guild_id: int) -> list[Dict[str, Any]]:
-    data = read_cache_json()
+    data = read_storage_json()
     todo = data.get("todo")
     if not isinstance(todo, dict):
         return []
@@ -251,13 +324,13 @@ def get_todos_for_guild(guild_id: int) -> list[Dict[str, Any]]:
 
 
 def set_todos_for_guild(guild_id: int, items: list[Dict[str, Any]]) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     todo = data.get("todo")
     if not isinstance(todo, dict):
         todo = {}
     todo[str(guild_id)] = items
     data["todo"] = todo
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def _todo_cfg(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -310,7 +383,7 @@ def _ensure_list_rec(cfg: Dict[str, Any], list_channel_id: int) -> Dict[str, Any
 
 
 def get_todo_category_id_for_guild(guild_id: int) -> Optional[int]:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
     raw = rec.get("category_id")
@@ -321,16 +394,16 @@ def get_todo_category_id_for_guild(guild_id: int) -> Optional[int]:
 
 
 def set_todo_category_id_for_guild(guild_id: int, category_id: int) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
     rec["category_id"] = str(int(category_id))
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def get_todo_list_board_message_id(list_channel_id: int) -> Optional[int]:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _find_list_rec(cfg, list_channel_id)
     raw = rec.get("board_message_id") if rec else None
@@ -341,28 +414,28 @@ def get_todo_list_board_message_id(list_channel_id: int) -> Optional[int]:
 
 
 def clear_todo_list_board_message_id(list_channel_id: int) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _find_list_rec(cfg, list_channel_id)
     if rec is not None:
         rec["board_message_id"] = None
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def set_todo_list_board_message_id(list_channel_id: int, message_id: int, *, guild_id: Optional[int] = None) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _ensure_list_rec(cfg, list_channel_id)
     rec["board_message_id"] = str(int(message_id))
     if guild_id is not None:
         rec["guild_id"] = str(int(guild_id))
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def get_todo_tasks_for_list_channel(list_channel_id: int) -> list[Dict[str, Any]]:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _find_list_rec(cfg, list_channel_id)
     rows = rec.get("tasks", []) if rec else []
@@ -370,28 +443,28 @@ def get_todo_tasks_for_list_channel(list_channel_id: int) -> list[Dict[str, Any]
 
 
 def set_todo_tasks_for_list_channel(list_channel_id: int, items: list[Dict[str, Any]], *, guild_id: Optional[int] = None) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _ensure_list_rec(cfg, list_channel_id)
     rec["tasks"] = items
     if guild_id is not None:
         rec["guild_id"] = str(int(guild_id))
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def clear_todo_tasks_for_list_channel(list_channel_id: int) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _find_list_rec(cfg, list_channel_id)
     if rec is not None:
         rec["tasks"] = []
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def get_todo_hub_channel_id_for_guild(guild_id: int) -> Optional[int]:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
     raw = rec.get("hub_channel_id")
@@ -402,16 +475,16 @@ def get_todo_hub_channel_id_for_guild(guild_id: int) -> Optional[int]:
 
 
 def set_todo_hub_channel_id_for_guild(guild_id: int, channel_id: int) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
     rec["hub_channel_id"] = str(int(channel_id))
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def get_todo_hub_message_id_for_guild(guild_id: int) -> Optional[int]:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
     raw = rec.get("hub_message_id")
@@ -422,25 +495,25 @@ def get_todo_hub_message_id_for_guild(guild_id: int) -> Optional[int]:
 
 
 def set_todo_hub_message_id_for_guild(guild_id: int, message_id: int) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
     rec["hub_message_id"] = str(int(message_id))
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def clear_todo_hub_message_id_for_guild(guild_id: int) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _guild_rec(cfg, guild_id)
     rec["hub_message_id"] = None
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def remove_todo_list_channel(list_channel_id: int) -> None:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
 
     lists = cfg.get("lists", {})
@@ -459,11 +532,11 @@ def remove_todo_list_channel(list_channel_id: int) -> None:
                 rec["hub_message_id"] = None
 
     data["todo_config"] = cfg
-    write_cache_json(data)
+    write_storage_json(data)
 
 
 def get_todo_list_channel_ids_for_guild(guild_id: int) -> list[int]:
-    data = read_cache_json()
+    data = read_storage_json()
     cfg = _todo_cfg(data)
     lists = cfg.get("lists", {})
     if not isinstance(lists, dict):
@@ -473,7 +546,7 @@ def get_todo_list_channel_ids_for_guild(guild_id: int) -> list[int]:
         if not isinstance(rec, dict):
             continue
         rec_guild_id = rec.get("guild_id")
-        # Legacy/fallback: include entries with unknown guild_id so old cache can still resolve tasks.
+        # Fallback: include entries with unknown guild_id.
         if rec_guild_id is not None and str(rec_guild_id) != str(guild_id):
             continue
         try:

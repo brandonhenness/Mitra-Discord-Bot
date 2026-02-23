@@ -1,12 +1,12 @@
 # mitra_bot/settings.py
 from __future__ import annotations
-
-import os
 from dataclasses import dataclass
 from typing import Optional
 
-from mitra_bot.models.settings_models import AppSettingsModel
-from mitra_bot.storage.cache_store import read_cache_with_defaults, write_cache_json
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from mitra_bot.storage.config_store import ensure_config_file
 
 
 @dataclass(frozen=True)
@@ -40,46 +40,64 @@ class AppSettings:
     ip_subscriber_role_name: str
 
 
+class EnvSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="ignore",
+        env_prefix="",
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
+
+    token: Optional[str] = Field(
+        default=None,
+        validation_alias="DISCORD_APPLICATION_TOKEN",
+    )
+
+
 def load_settings(*, interactive_token: bool = True) -> AppSettings:
     """
-    Load settings from cache.json + env overrides.
+    Load settings from config.toml + env overrides.
     Optionally prompt for token if missing.
     """
-    cfg = read_cache_with_defaults()
+    cfg = ensure_config_file()
+    bot_cfg = cfg.get("bot", {}) if isinstance(cfg.get("bot"), dict) else {}
+    ups_cfg = cfg.get("ups", {}) if isinstance(cfg.get("ups"), dict) else {}
 
-    env_token = os.getenv("MITRA_TOKEN") or os.getenv("DISCORD_TOKEN")
-    token = (env_token or cfg.get("token") or "").strip()
+    env = EnvSettings()
+    token = (env.token or "").strip()
 
     if not token and interactive_token:
         token = input("Please enter your Discord bot token: ").strip()
-        cfg["token"] = token
-        write_cache_json(cfg)
 
     if not token:
-        raise RuntimeError("Discord token is missing (cache.json or env var).")
-
-    parsed = AppSettingsModel.model_validate(cfg)
+        raise RuntimeError("Discord token is missing (set DISCORD_APPLICATION_TOKEN).")
 
     ups = UPSSettings(
-        enabled=parsed.ups.enabled,
-        poll_seconds=parsed.ups.poll_seconds,
-        warn_time_to_empty_seconds=parsed.ups.warn_time_to_empty_seconds,
-        critical_time_to_empty_seconds=parsed.ups.critical_time_to_empty_seconds,
-        auto_shutdown_enabled=parsed.ups.auto_shutdown_enabled,
-        auto_shutdown_action=parsed.ups.auto_shutdown_action,
-        auto_shutdown_delay_seconds=parsed.ups.auto_shutdown_delay_seconds,
-        auto_shutdown_force=parsed.ups.auto_shutdown_force,
-        log_enabled=parsed.ups.log_enabled,
-        log_file=parsed.ups.log_file,
-        graph_default_hours=parsed.ups.graph_default_hours,
-        timezone=parsed.ups.timezone,
+        enabled=bool(ups_cfg.get("enabled", True)),
+        poll_seconds=int(ups_cfg.get("poll_seconds", 30)),
+        warn_time_to_empty_seconds=int(ups_cfg.get("warn_time_to_empty_seconds", 600)),
+        critical_time_to_empty_seconds=int(ups_cfg.get("critical_time_to_empty_seconds", 180)),
+        auto_shutdown_enabled=bool(ups_cfg.get("auto_shutdown_enabled", False)),
+        auto_shutdown_action=str(ups_cfg.get("auto_shutdown_action", "shutdown")),
+        auto_shutdown_delay_seconds=int(ups_cfg.get("auto_shutdown_delay_seconds", 0)),
+        auto_shutdown_force=bool(ups_cfg.get("auto_shutdown_force", False)),
+        log_enabled=bool(ups_cfg.get("log_enabled", True)),
+        log_file=str(ups_cfg.get("log_file", "ups_stats.jsonl")),
+        graph_default_hours=int(ups_cfg.get("graph_default_hours", 6)),
+        timezone=str(ups_cfg.get("timezone", "UTC")),
     )
+
+    channel_id = bot_cfg.get("channel_id")
+    try:
+        channel_id = int(channel_id) if channel_id is not None else None
+    except Exception:
+        channel_id = None
 
     return AppSettings(
         token=token,
-        channel_id=parsed.resolved_channel_id,
-        ip_poll_seconds=parsed.ip_poll_seconds,
+        channel_id=channel_id,
+        ip_poll_seconds=int(bot_cfg.get("ip_poll_seconds", 900)),
         ups=ups,
-        admin_role_name=parsed.admin_role_name,
-        ip_subscriber_role_name=parsed.ip_subscriber_role_name,
+        admin_role_name=str(bot_cfg.get("admin_role_name", "Mitra Admin")),
+        ip_subscriber_role_name=str(bot_cfg.get("ip_subscriber_role_name", "Mitra IP Subscriber")),
     )

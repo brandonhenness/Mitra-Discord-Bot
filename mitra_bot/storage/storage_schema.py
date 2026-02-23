@@ -74,13 +74,11 @@ class CloudflarePatchModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     api_token: Optional[str] = None
-    api_key: Optional[str] = None
-    email: Optional[str] = None
     zone_id: Optional[str] = None
     record_ids: Optional[list[str]] = None
     enabled: Optional[bool] = None
 
-    @field_validator("api_token", "api_key", "email", "zone_id", mode="before")
+    @field_validator("api_token", "zone_id", mode="before")
     @classmethod
     def _coerce_optional_str(cls, value: Any) -> Optional[str]:
         if value is None:
@@ -262,8 +260,6 @@ class CloudflareConfigModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     api_token: Optional[str] = None
-    api_key: Optional[str] = None
-    email: Optional[str] = None
     zone_id: Optional[str] = None
     record_ids: list[str] = Field(default_factory=list)
     enabled: Optional[bool] = None
@@ -299,6 +295,40 @@ class NotificationsConfigModel(BaseModel):
                 continue
             out[guild_id] = channel_id
         return out
+
+
+class UpdaterConfigModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = True
+    include_prerelease: bool = False
+    check_on_startup: bool = True
+    check_interval_seconds: int = 21600
+    github_repo: Optional[str] = None
+    last_checked_epoch: Optional[int] = None
+    last_notified_version: Optional[str] = None
+    pending_version: Optional[str] = None
+    pending_release_url: Optional[str] = None
+    pending_notes: Optional[str] = None
+    pending_notified_epoch: Optional[int] = None
+    installed_version: Optional[str] = None
+
+
+class UpdaterPatchModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: Optional[bool] = None
+    include_prerelease: Optional[bool] = None
+    check_on_startup: Optional[bool] = None
+    check_interval_seconds: Optional[int] = None
+    github_repo: Optional[str] = None
+    last_checked_epoch: Optional[int] = None
+    last_notified_version: Optional[str] = None
+    pending_version: Optional[str] = None
+    pending_release_url: Optional[str] = None
+    pending_notes: Optional[str] = None
+    pending_notified_epoch: Optional[int] = None
+    installed_version: Optional[str] = None
 
 
 class PowerRestartNoticeModel(BaseModel):
@@ -393,13 +423,14 @@ class PowerRestartNoticePatchModel(BaseModel):
         return _snowflake_str(value)
 
 
-class CacheModel(BaseModel):
+class StorageModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     ups: UPSConfigModel = Field(default_factory=UPSConfigModel)
     todo_config: TodoConfigModel = Field(default_factory=TodoConfigModel)
     cloudflare: CloudflareConfigModel = Field(default_factory=CloudflareConfigModel)
     notifications: NotificationsConfigModel = Field(default_factory=NotificationsConfigModel)
+    updater: UpdaterConfigModel = Field(default_factory=UpdaterConfigModel)
     power_restart_notice: Optional[PowerRestartNoticeModel] = None
 
     @model_validator(mode="before")
@@ -410,7 +441,7 @@ class CacheModel(BaseModel):
         cloudflare = data.get("cloudflare")
         if not isinstance(cloudflare, dict):
             cloudflare = {}
-        for key in ("api_token", "api_key", "email", "zone_id", "record_ids", "enabled"):
+        for key in ("api_token", "zone_id", "record_ids", "enabled"):
             if key not in cloudflare and key in data:
                 cloudflare[key] = data.get(key)
         data["cloudflare"] = cloudflare
@@ -425,8 +456,8 @@ class CacheModel(BaseModel):
         return data
 
 
-def normalize_cache_data(data: Dict[str, Any]) -> Dict[str, Any]:
-    model = CacheModel.model_validate(data if isinstance(data, dict) else {})
+def normalize_storage_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    model = StorageModel.model_validate(data if isinstance(data, dict) else {})
     return model.model_dump(mode="json", exclude_none=False)
 
 
@@ -451,6 +482,13 @@ def normalize_cloudflare_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
 
 def normalize_power_restart_notice_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
     model = PowerRestartNoticePatchModel.model_validate(
+        patch if isinstance(patch, dict) else {}
+    )
+    return model.model_dump(mode="json", exclude_none=True)
+
+
+def normalize_updater_patch(patch: Dict[str, Any]) -> Dict[str, Any]:
+    model = UpdaterPatchModel.model_validate(
         patch if isinstance(patch, dict) else {}
     )
     return model.model_dump(mode="json", exclude_none=True)
