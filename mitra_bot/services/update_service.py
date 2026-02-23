@@ -255,7 +255,7 @@ def _install_requirements() -> None:
     if pyproject.exists():
         uv = shutil.which("uv")
         if uv:
-            cmd = [uv, "sync", "--no-dev", "--frozen"]
+            cmd = [uv, "sync", "--no-dev", "--frozen", "--no-install-project"]
             subprocess.run(
                 cmd,
                 cwd=PROJECT_ROOT,
@@ -334,7 +334,7 @@ def install_release(release: ReleaseInfo) -> InstallResult:
 
 
 def spawn_replacement_process() -> None:
-    cmd = [sys.executable, *sys.argv]
+    cmd = [sys.executable, "-m", "mitra_bot.main"]
     kwargs = {
         "cwd": str(PROJECT_ROOT),
         "stdin": subprocess.DEVNULL,
