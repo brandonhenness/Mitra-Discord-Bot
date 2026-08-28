@@ -1357,11 +1357,29 @@ print("config.toml schema validation OK")
 print("state.db SQLite integrity/schema validation OK")
 '@
 
-    Invoke-Uv @(
-        "run", "--no-sync", "python", "-c", $validationCode,
-        $ResolvedRepoPath, $EnvPath, $ConfigPath, $StatePath,
-        $(if ($VerifyCloudflareWriteRequested) { "1" } else { "0" })
-    )
+    # Windows PowerShell 5.1 rewrites quotes inside multiline native-command
+    # arguments. Writing the validator to a private, unique temporary file
+    # keeps Python source code out of its legacy command-line serializer.
+    $validationScriptPath = Join-Path (
+        [System.IO.Path]::GetTempPath()
+    ) ("mitra-validation-" + [guid]::NewGuid().ToString("N") + ".py")
+    $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    try {
+        [System.IO.File]::WriteAllText(
+            $validationScriptPath,
+            $validationCode,
+            $utf8NoBom
+        )
+        Invoke-Uv @(
+            "run", "--no-sync", "python", $validationScriptPath,
+            $ResolvedRepoPath, $EnvPath, $ConfigPath, $StatePath,
+            $(if ($VerifyCloudflareWriteRequested) { "1" } else { "0" })
+        )
+    } finally {
+        if (Test-Path -LiteralPath $validationScriptPath -PathType Leaf) {
+            Remove-Item -LiteralPath $validationScriptPath -Force
+        }
+    }
 }
 
 $deploymentState = $null
