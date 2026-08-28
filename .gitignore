@@ -1,5 +1,6 @@
 /config.py
 data.json
+cache.json
 config.toml
 state.db
 state.db-*

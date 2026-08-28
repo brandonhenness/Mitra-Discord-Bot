@@ -32,6 +32,7 @@ dev = [
 mitra-bot = "mitra_bot.main:main"
 mitra-init-config = "mitra_bot.init_config:main"
 mitra-init = "mitra_bot.init_config:main"
+mitra-migrate-cache = "mitra_bot.migrate_legacy_cache:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mitra_bot"]
