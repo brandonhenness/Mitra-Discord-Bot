@@ -4,6 +4,7 @@ cache.json
 config.toml
 state.db
 state.db-*
+*.jsonl
 .recovery/
 
 
