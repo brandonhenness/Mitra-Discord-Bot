@@ -189,6 +189,15 @@ function Invoke-UpdaterSelfTest {
     if ($relationship.Ahead -ne 2 -or $relationship.Behind -ne 3) {
         throw "Git ahead/behind parser self-test failed."
     }
+    if (-not (Test-MitraOriginUrl "https://github.com/Henness0666/Mitra-Discord-Bot.git")) {
+        throw "Mitra HTTPS origin self-test failed."
+    }
+    if (-not (Test-MitraOriginUrl "git@github.com:Henness0666/Mitra-Discord-Bot.git")) {
+        throw "Mitra SSH origin self-test failed."
+    }
+    if (Test-MitraOriginUrl "https://github.com/example/Mitra-Discord-Bot.git") {
+        throw "Mitra origin rejection self-test failed."
+    }
     Write-Host "Updater syntax/native-capture/redaction self-test: OK" -ForegroundColor Green
 }
 
@@ -245,38 +254,88 @@ function Resolve-RepoPath([string]$ExplicitPath) {
     throw "Could not locate the Mitra Git repository. Pass -RepoPath explicitly."
 }
 
+function Test-MitraOriginUrl([string]$RemoteUrl) {
+    if ([string]::IsNullOrWhiteSpace($RemoteUrl)) {
+        return $false
+    }
+    return $RemoteUrl.Trim() -match '(?i)^(?:https?://github\.com/|git@github\.com:|ssh://git@github\.com/)Henness0666/Mitra-Discord-Bot(?:\.git)?/?$'
+}
+
 function Assert-MitraRepository([string]$ResolvedRepoPath) {
+    $originResult = Invoke-NativeCapture $script:GitExe @(
+        "-C", $ResolvedRepoPath, "config", "--get", "remote.origin.url"
+    ) ""
+    $originLines = @(
+        @($originResult.Output) |
+            ForEach-Object { ([string]$_).Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    if (
+        $originResult.ExitCode -ne 0 -or
+        $originLines.Count -ne 1 -or
+        -not (Test-MitraOriginUrl $originLines[0])
+    ) {
+        throw "Repository identity check failed: origin is not the expected Mitra GitHub repository."
+    }
+
     $pyprojectPath = Join-Path $ResolvedRepoPath "pyproject.toml"
     $lockPath = Join-Path $ResolvedRepoPath "uv.lock"
     $packageDirectory = Join-Path $ResolvedRepoPath "mitra_bot"
     $packageInit = Join-Path $packageDirectory "__init__.py"
     $packageMain = Join-Path $packageDirectory "main.py"
 
-    foreach ($requiredPath in @($pyprojectPath, $lockPath, $packageInit, $packageMain)) {
-        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
-            throw "Repository identity check failed: a required Mitra project file is missing."
+    $hasModernLayout = @($pyprojectPath, $lockPath, $packageInit, $packageMain) |
+        ForEach-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+        Where-Object { -not $_ } |
+        Measure-Object |
+        Select-Object -ExpandProperty Count
+    $hasModernLayout = ($hasModernLayout -eq 0)
+
+    if ($hasModernLayout) {
+        try {
+            $pyprojectText = [System.IO.File]::ReadAllText($pyprojectPath)
+            $projectSection = [regex]::Match(
+                $pyprojectText,
+                '(?ms)^\s*\[project\]\s*(.*?)(?=^\s*\[|\z)'
+            )
+            if (-not $projectSection.Success) {
+                throw "project section missing"
+            }
+            $nameMatch = [regex]::Match(
+                $projectSection.Groups[1].Value,
+                '(?mi)^\s*name\s*=\s*["'']mitra-discord-bot["'']\s*(?:#.*)?$'
+            )
+            if (-not $nameMatch.Success) {
+                throw "project name mismatch"
+            }
+        } catch {
+            throw "Repository identity check failed: pyproject.toml is not the Mitra package."
         }
+        return
     }
 
-    try {
-        $pyprojectText = [System.IO.File]::ReadAllText($pyprojectPath)
-        $projectSection = [regex]::Match(
-            $pyprojectText,
-            '(?ms)^\s*\[project\]\s*(.*?)(?=^\s*\[|\z)'
-        )
-        if (-not $projectSection.Success) {
-            throw "project section missing"
-        }
-        $nameMatch = [regex]::Match(
-            $projectSection.Groups[1].Value,
-            '(?mi)^\s*name\s*=\s*["'']mitra-discord-bot["'']\s*(?:#.*)?$'
-        )
-        if (-not $nameMatch.Success) {
-            throw "project name mismatch"
-        }
-    } catch {
-        throw "Repository identity check failed: pyproject.toml is not the Mitra package."
+    $legacyRequirements = Join-Path $ResolvedRepoPath "requirements.txt"
+    $legacyEntrypoints = @(
+        (Join-Path $ResolvedRepoPath "bot.py"),
+        (Join-Path $ResolvedRepoPath "main.py"),
+        (Join-Path $ResolvedRepoPath "run.py"),
+        $packageMain
+    )
+    $hasLegacyEntrypoint = @(
+        $legacyEntrypoints |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+    ).Count -gt 0
+    if (
+        -not (Test-Path -LiteralPath $legacyRequirements -PathType Leaf) -or
+        -not $hasLegacyEntrypoint
+    ) {
+        throw "Repository identity check failed: neither the modern nor a known legacy Mitra layout was found."
     }
+
+    Write-Host (
+        "Verified legacy Mitra checkout by exact GitHub origin and known legacy files; " +
+        "the update will replace it with the current package layout."
+    ) -ForegroundColor Yellow
 }
 
 function Resolve-BackupRoot([string]$ExplicitPath, [string]$ResolvedRepoPath) {
@@ -1294,6 +1353,7 @@ try {
 
     Step "Preflight"
     $script:ResolvedRepoPath = Resolve-RepoPath $RepoPath
+    $script:GitExe = Resolve-GitExe
     Assert-MitraRepository $script:ResolvedRepoPath
     $resolvedBackupRoot = Resolve-BackupRoot $BackupRoot $script:ResolvedRepoPath
     $resolvedEnvFileName = Resolve-EnvFileName $script:ResolvedRepoPath $EnvFileName
@@ -1303,7 +1363,6 @@ try {
     $configPath = $runtimePaths.ConfigPath
     $statePath = $runtimePaths.StatePath
 
-    $script:GitExe = Resolve-GitExe
     $script:UvExe = Resolve-UvExe
     Write-Host "Repository: $script:ResolvedRepoPath"
     Write-Host "Target branch: $TargetBranch"
