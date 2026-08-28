@@ -246,7 +246,9 @@ class UPSCog(commands.Cog):
             required=True,
         ),
     ):
-        if ensure_admin(ctx):
+        admin_guard = ensure_admin(ctx)
+        if admin_guard:
+            await admin_guard
             return
 
         set_ups_config({"enabled": bool(enabled)})
@@ -268,7 +270,9 @@ class UPSCog(commands.Cog):
             required=True,
         ),
     ):
-        if ensure_admin(ctx):
+        admin_guard = ensure_admin(ctx)
+        if admin_guard:
+            await admin_guard
             return
 
         # Validate timezone string
@@ -301,7 +305,9 @@ class UPSCog(commands.Cog):
             max_value=168,
         ),
     ):
-        if ensure_admin(ctx):
+        admin_guard = ensure_admin(ctx)
+        if admin_guard:
+            await admin_guard
             return
 
         await ctx.defer(ephemeral=True)
