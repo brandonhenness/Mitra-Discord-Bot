@@ -6,7 +6,7 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from mitra_bot.storage.config_store import ensure_config_file
+from mitra_bot.storage.config_store import read_config_dict
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,7 @@ class UPSSettings:
 @dataclass(frozen=True)
 class AppSettings:
     token: str
+    cloudflare_api_token: Optional[str]
     channel_id: Optional[int]
     ip_poll_seconds: int
     ups: UPSSettings
@@ -52,6 +53,10 @@ class EnvSettings(BaseSettings):
         default=None,
         validation_alias="DISCORD_APPLICATION_TOKEN",
     )
+    cloudflare_api_token: Optional[str] = Field(
+        default=None,
+        validation_alias="CLOUDFLARE_API_TOKEN",
+    )
 
 
 def load_settings(*, interactive_token: bool = True) -> AppSettings:
@@ -59,12 +64,13 @@ def load_settings(*, interactive_token: bool = True) -> AppSettings:
     Load settings from config.toml + env overrides.
     Optionally prompt for token if missing.
     """
-    cfg = ensure_config_file()
+    cfg = read_config_dict()
     bot_cfg = cfg.get("bot", {}) if isinstance(cfg.get("bot"), dict) else {}
     ups_cfg = cfg.get("ups", {}) if isinstance(cfg.get("ups"), dict) else {}
 
     env = EnvSettings()
     token = (env.token or "").strip()
+    cloudflare_api_token = (env.cloudflare_api_token or "").strip() or None
 
     if not token and interactive_token:
         token = input("Please enter your Discord bot token: ").strip()
@@ -95,6 +101,7 @@ def load_settings(*, interactive_token: bool = True) -> AppSettings:
 
     return AppSettings(
         token=token,
+        cloudflare_api_token=cloudflare_api_token,
         channel_id=channel_id,
         ip_poll_seconds=int(bot_cfg.get("ip_poll_seconds", 900)),
         ups=ups,

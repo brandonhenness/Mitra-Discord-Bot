@@ -1,6 +1,7 @@
 # mitra_bot/discord_app/cogs/ip_cog.py
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -11,7 +12,6 @@ from mitra_bot.services.notifier import Notifier
 from mitra_bot.services.role_manager import ensure_role
 from mitra_bot.storage.storage_store import (
     get_notification_channel_id_for_guild,
-    save_ip,
 )
 
 
@@ -33,7 +33,7 @@ class IPCog(commands.Cog):
     async def status(self, ctx: discord.ApplicationContext):
         await ctx.defer(ephemeral=True)
 
-        ip = get_public_ip()
+        ip = await asyncio.to_thread(get_public_ip)
         if not ip:
             await ctx.respond("Failed to fetch public IP.", ephemeral=True)
             return
@@ -78,10 +78,14 @@ class IPCog(commands.Cog):
             f"Unsubscribed. Removed role: **{role.name}**", ephemeral=True
         )
 
-    async def notify_ip_change(self, new_ip: str):
+    async def notify_ip_change(self, new_ip: str) -> bool:
         """
         Called by the IP monitor task when IP changes.
         Sends to the configured channel and mentions the subscriber role.
+
+        Returns True when all configured destinations accepted the message. The
+        monitor logs False as a best-effort notification failure after committing
+        the authoritative DNS/IP state.
         """
 
         logging.info("IP changed to %s — sending notification.", new_ip)
@@ -90,11 +94,13 @@ class IPCog(commands.Cog):
 
         notifier = Notifier(self.bot)
 
-        sent = 0
+        configured = 0
+        failed = 0
         for guild in self.bot.guilds:
             per_guild_channel_id = get_notification_channel_id_for_guild(guild.id)
             if not per_guild_channel_id:
                 continue
+            configured += 1
 
             role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
             role = discord.utils.get(guild.roles, name=role_name)
@@ -112,36 +118,47 @@ class IPCog(commands.Cog):
 
                 mention_prefix = f"{role.mention}\n"
 
-            await notifier.send_to_channel(per_guild_channel_id, mention_prefix + msg_body)
-            sent += 1
+            delivered = await notifier.send_to_channel(
+                per_guild_channel_id, mention_prefix + msg_body
+            )
+            if not delivered:
+                failed += 1
 
-        if sent == 0:
-            # Backward compatibility for older single-channel config.
-            channel_id = self.bot.state.channel_id  # type: ignore[attr-defined]
-            if not channel_id:
+        if configured:
+            if failed:
                 logging.warning(
-                    "No per-guild notification channel or legacy channel_id configured; "
-                    "cannot send IP change alert."
+                    "IP change notification failed for %s of %s configured channel(s).",
+                    failed,
+                    configured,
                 )
-                await save_ip(new_ip)
-                return
+                return False
+            return True
 
-            mention_prefix = ""
-            for guild in self.bot.guilds:
-                role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
-                role = discord.utils.get(guild.roles, name=role_name)
-                if role:
-                    if not role.mentionable:
-                        try:
-                            await role.edit(
-                                mentionable=True,
-                                reason="Mitra bot needs to mention this role",
-                            )
-                        except Exception:
-                            logging.debug("Could not set role to mentionable.")
-                    mention_prefix = f"{role.mention}\n"
-                    break
+        # Backward compatibility for older single-channel config.
+        channel_id = self.bot.state.channel_id  # type: ignore[attr-defined]
+        if not channel_id:
+            logging.warning(
+                "No per-guild notification channel or legacy channel_id configured; "
+                "cannot send IP change alert."
+            )
+            # There is no configured notification to retry. The monitor may
+            # safely persist the new baseline without sending a message.
+            return True
 
-            await notifier.send_to_channel(channel_id, mention_prefix + msg_body)
+        mention_prefix = ""
+        for guild in self.bot.guilds:
+            role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
+            role = discord.utils.get(guild.roles, name=role_name)
+            if role:
+                if not role.mentionable:
+                    try:
+                        await role.edit(
+                            mentionable=True,
+                            reason="Mitra bot needs to mention this role",
+                        )
+                    except Exception:
+                        logging.debug("Could not set role to mentionable.")
+                mention_prefix = f"{role.mention}\n"
+                break
 
-        await save_ip(new_ip)
+        return await notifier.send_to_channel(channel_id, mention_prefix + msg_body)

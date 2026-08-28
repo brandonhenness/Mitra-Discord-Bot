@@ -103,19 +103,43 @@ class CloudflareService:
     def get_dns_records(self, zone_id: str) -> List[Dict[str, Any]]:
         """
         Return DNS records for a given zone.
+
+        Cloudflare paginates this endpoint. Fetch every reported page so a
+        configured record ID cannot be missed merely because it is not on the
+        first page.
         """
-        data = self._request(
-            "GET",
-            f"/zones/{zone_id}/dns_records",
-        )
         out: List[Dict[str, Any]] = []
-        for raw in data.get("result", []):
+        page = 1
+        while True:
+            data = self._request(
+                "GET",
+                f"/zones/{zone_id}/dns_records",
+                params={"page": page, "per_page": 100},
+            )
+            raw_records = data.get("result", [])
+            if not isinstance(raw_records, list):
+                raise RuntimeError("Unexpected Cloudflare DNS records response format.")
+
+            for raw in raw_records:
+                try:
+                    out.append(
+                        CloudflareDNSRecord.model_validate(raw).model_dump(mode="json")
+                    )
+                except ValidationError:
+                    logging.debug(
+                        "Skipping invalid Cloudflare DNS record payload: %s", raw
+                    )
+
+            result_info = data.get("result_info")
+            if not isinstance(result_info, dict):
+                break
             try:
-                out.append(
-                    CloudflareDNSRecord.model_validate(raw).model_dump(mode="json")
-                )
-            except ValidationError:
-                logging.debug("Skipping invalid Cloudflare DNS record payload: %s", raw)
+                total_pages = max(1, int(result_info.get("total_pages", 1)))
+            except (TypeError, ValueError):
+                total_pages = 1
+            if page >= total_pages:
+                break
+            page += 1
         return out
 
     def update_dns_record(
@@ -130,7 +154,8 @@ class CloudflareService:
         proxied: bool = False,
     ) -> Dict[str, Any]:
         """
-        Update an existing DNS record.
+        Partially update an existing DNS record without replacing metadata such
+        as comments or tags that Mitra does not manage.
 
         ttl=1 means "automatic" in Cloudflare.
         """
@@ -143,7 +168,7 @@ class CloudflareService:
         }
 
         data = self._request(
-            "PUT",
+            "PATCH",
             f"/zones/{zone_id}/dns_records/{record_id}",
             json_body=body,
         )

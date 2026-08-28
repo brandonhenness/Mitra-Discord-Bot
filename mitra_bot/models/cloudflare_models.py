@@ -10,6 +10,7 @@ class CloudflareAPIEnvelope(BaseModel):
 
     success: bool = False
     result: Any = None
+    result_info: Dict[str, Any] = Field(default_factory=dict)
     errors: List[Dict[str, Any]] = Field(default_factory=list)
     messages: List[Dict[str, Any]] = Field(default_factory=list)
 

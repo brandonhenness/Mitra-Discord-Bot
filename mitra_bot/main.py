@@ -36,7 +36,11 @@ async def main_async() -> None:
 
     bot = create_bot(state=state)
 
-    ip_task = IPMonitorTask(bot, interval_seconds=settings.ip_poll_seconds)
+    ip_task = IPMonitorTask(
+        bot,
+        interval_seconds=settings.ip_poll_seconds,
+        cloudflare_api_token=settings.cloudflare_api_token,
+    )
     ups_task = UPSMonitorTask(bot, poll_seconds=settings.ups.poll_seconds)
     updater_cfg = get_updater_config()
     update_task = UpdateMonitorTask(

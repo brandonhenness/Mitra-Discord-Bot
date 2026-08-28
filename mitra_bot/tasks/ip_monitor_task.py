@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from mitra_bot.services.cloudflare_service import CloudflareService
 from mitra_bot.services.ip_service import get_public_ip
-from mitra_bot.storage.storage_store import get_cloudflare_config, load_ip
+from mitra_bot.storage.storage_store import get_cloudflare_config, load_ip, save_ip
 
 
 class CloudflareDNSUpdateConfig(BaseModel):
@@ -65,11 +65,19 @@ class IPMonitorTask:
     Background loop that checks public IP and notifies subscribers on change.
     """
 
-    def __init__(self, bot: discord.Bot, *, interval_seconds: int = 60) -> None:
+    def __init__(
+        self,
+        bot: discord.Bot,
+        *,
+        interval_seconds: int = 60,
+        cloudflare_api_token: Optional[str] = None,
+    ) -> None:
         self.bot = bot
         self.interval_seconds = interval_seconds
+        self.cloudflare_api_token = (cloudflare_api_token or "").strip()
 
         self._last_ip: Optional[str] = None
+        self._cloudflare_reconciled = False
 
         # bind loop
         self.loop.change_interval(seconds=self.interval_seconds)
@@ -78,35 +86,37 @@ class IPMonitorTask:
         # Load last observed IP from persistent state.
         self._last_ip = await load_ip()
         if not self._last_ip:
-            logging.info("No cached IP found.")
+            logging.info("No stored IP found.")
         else:
-            logging.info("Cached IP loaded: %s", self._last_ip)
+            logging.info("Stored IP loaded: %s", self._last_ip)
 
         self.loop.start()
 
-    async def _update_cloudflare_dns(self, ip: str) -> None:
-        raw_cfg = get_cloudflare_config()
+    async def _update_cloudflare_dns(self, ip: str) -> int:
+        raw_cfg = dict(get_cloudflare_config())
+        if self.cloudflare_api_token:
+            # The secret is loaded centrally from .env/real environment by
+            # AppSettings and injected in memory. It is never written to config.toml
+            # or state.db.
+            raw_cfg["api_token"] = self.cloudflare_api_token
         if not raw_cfg:
-            return
+            return 0
         cfg = CloudflareDNSUpdateConfig.model_validate(raw_cfg)
 
         if not cfg.enabled:
             logging.info("Cloudflare DNS update is disabled in config.")
-            return
+            return 0
 
         if not cfg.zone_id:
-            logging.warning("Cloudflare config is missing zone_id; skipping DNS update.")
-            return
+            raise RuntimeError("Cloudflare config is enabled but zone_id is missing.")
 
         if not cfg.record_ids:
-            logging.warning("Cloudflare config has no record_ids; skipping DNS update.")
-            return
+            raise RuntimeError("Cloudflare config is enabled but record_ids is empty.")
 
         if not cfg.has_auth:
-            logging.warning(
-                "Cloudflare config needs api_token; skipping DNS update."
+            raise RuntimeError(
+                "Cloudflare config is enabled but CLOUDFLARE_API_TOKEN is missing."
             )
-            return
 
         ip_version = ipaddress.ip_address(ip).version
 
@@ -116,34 +126,46 @@ class IPMonitorTask:
         records = await asyncio.to_thread(service.get_dns_records, cfg.zone_id)
         records_by_id = {str(r.get("id", "")): r for r in records}
 
+        missing_record_ids = [
+            record_id for record_id in cfg.record_ids if record_id not in records_by_id
+        ]
+        if missing_record_ids:
+            missing = ", ".join(missing_record_ids)
+            raise RuntimeError(
+                f"Cloudflare record_id(s) not found in zone {cfg.zone_id}: {missing}"
+            )
+
+        expected_record_type = "A" if ip_version == 4 else "AAAA"
+        incompatible_records = {
+            record_id: str(records_by_id[record_id].get("type", "")).upper()
+            for record_id in cfg.record_ids
+            if str(records_by_id[record_id].get("type", "")).upper()
+            != expected_record_type
+        }
+        if incompatible_records:
+            rendered = ", ".join(
+                f"{record_id} ({record_type or 'unknown'})"
+                for record_id, record_type in incompatible_records.items()
+            )
+            raise RuntimeError(
+                f"Cloudflare record_id(s) must be {expected_record_type} records "
+                f"for public IP {ip}: {rendered}"
+            )
+
         updated = 0
         for record_id in cfg.record_ids:
-            record = records_by_id.get(record_id)
-            if not record:
-                logging.warning("Cloudflare record_id not found in zone: %s", record_id)
-                continue
+            record = records_by_id[record_id]
 
             record_type = str(record.get("type", "")).upper()
-            if ip_version == 4 and record_type != "A":
-                logging.info(
-                    "Skipping record %s (%s): public IP is IPv4.",
-                    record_id,
-                    record_type,
-                )
-                continue
-            if ip_version == 6 and record_type != "AAAA":
-                logging.info(
-                    "Skipping record %s (%s): public IP is IPv6.",
-                    record_id,
-                    record_type,
-                )
-                continue
-
             record_name = str(record.get("name", "")).strip()
             if not record_name:
-                logging.warning(
-                    "Skipping record %s: missing record name in Cloudflare response.",
-                    record_id,
+                raise RuntimeError(
+                    f"Cloudflare record {record_id} is missing its record name."
+                )
+
+            if str(record.get("content", "")).strip() == ip:
+                logging.debug(
+                    "Cloudflare record %s already points to %s.", record_id, ip
                 )
                 continue
 
@@ -167,27 +189,61 @@ class IPMonitorTask:
             updated += 1
 
         logging.info("Cloudflare DNS update complete. Updated %s record(s).", updated)
+        return updated
 
     @tasks.loop(seconds=60)
     async def loop(self) -> None:
-        ip = get_public_ip()
+        ip = await asyncio.to_thread(get_public_ip)
         if not ip:
             return
 
         if self._last_ip is None:
+            try:
+                await self._update_cloudflare_dns(ip)
+                await save_ip(ip)
+            except Exception:
+                logging.exception(
+                    "Failed to establish initial public IP baseline; will retry."
+                )
+                return
             self._last_ip = ip
+            self._cloudflare_reconciled = True
+            logging.info("Stored initial public IP baseline: %s", ip)
             return
 
         if ip == self._last_ip:
+            if not self._cloudflare_reconciled:
+                try:
+                    await self._update_cloudflare_dns(ip)
+                except Exception:
+                    logging.exception(
+                        "Failed to reconcile Cloudflare DNS at startup; will retry."
+                    )
+                    return
+                self._cloudflare_reconciled = True
             return
 
         logging.info("Public IP changed: %s -> %s", self._last_ip, ip)
-        self._last_ip = ip
 
         try:
             await self._update_cloudflare_dns(ip)
         except Exception:
-            logging.exception("Failed to update Cloudflare DNS records.")
+            logging.exception(
+                "Failed to update Cloudflare DNS records; IP change will be retried."
+            )
+            return
+
+        # DNS is the authoritative operation. Commit the new baseline before
+        # best-effort Discord delivery so a broken destination cannot cause
+        # duplicate alerts to every healthy guild on each poll.
+        try:
+            await save_ip(ip)
+        except Exception:
+            logging.exception("Failed to persist changed public IP; will retry.")
+            return
+
+        self._last_ip = ip
+        self._cloudflare_reconciled = True
 
         # Find the IPCog and call its notifier
         cog = self.bot.get_cog("IPCog")
@@ -196,9 +252,16 @@ class IPMonitorTask:
             return
 
         try:
-            await cog.notify_ip_change(ip)  # type: ignore[attr-defined]
+            delivered = await cog.notify_ip_change(ip)  # type: ignore[attr-defined]
         except Exception:
-            logging.exception("Failed to notify IP change.")
+            logging.exception("Failed to notify IP change; DNS state was committed.")
+            return
+
+        if not delivered:
+            logging.warning(
+                "IP change notification was not delivered to every destination; "
+                "DNS state was committed to avoid duplicate alerts."
+            )
 
     @loop.before_loop
     async def before_loop(self) -> None:

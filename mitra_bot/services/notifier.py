@@ -19,9 +19,9 @@ class Notifier:
     def __init__(self, bot: discord.Bot) -> None:
         self.bot = bot
 
-    async def send_to_channel(self, channel_id: Optional[int], message: str) -> None:
+    async def send_to_channel(self, channel_id: Optional[int], message: str) -> bool:
         if not channel_id:
-            return
+            return False
 
         try:
             channel = self.bot.get_channel(int(channel_id))
@@ -30,11 +30,13 @@ class Notifier:
 
             if isinstance(channel, (discord.TextChannel, discord.Thread)):
                 await channel.send(message)
+                return True
             else:
                 logging.warning("Channel %s is not a text channel/thread.", channel_id)
 
         except Exception:
             logging.exception("Failed to send message to channel %s", channel_id)
+        return False
 
     async def dm_subscribers(self, subscriber_ids: Iterable[int], message: str) -> None:
         for user_id in list(subscriber_ids):
