@@ -118,6 +118,98 @@ uv run --env-file .env.production mitra-bot
 
 For Windows service/task setups, use the same command after setting required environment variables and ensuring `config.toml` exists.
 
+### Updating a Windows server
+
+Use [`scripts/Update-MitraBot.ps1`](scripts/Update-MitraBot.ps1) for manual
+deployments. Keep a copy beside the repository so the updater itself is not
+replaced while Git is changing the checkout. The script requires the bot to be
+stopped, makes a private hash-verified backup outside the repository, and never
+restarts the bot or reapplies a Git stash automatically.
+
+First stop the service, scheduled task, or console process. Then run once
+without `-AutoStash` so any local Git changes are displayed and backed up:
+
+```powershell
+& "C:\Users\Mitra\Documents\GitHub\Update-MitraBot.ps1" `
+  -RepoPath "C:\Users\Mitra\Documents\GitHub\Mitra-Discord-Bot" `
+  -EnvFileName ".env" `
+  -ConfirmBotStopped
+```
+
+Review the reported paths. If those changes should be preserved in a stash,
+run the update with both `-AutoStash` and `-VerifyCloudflareWrite`:
+
+```powershell
+& "C:\Users\Mitra\Documents\GitHub\Update-MitraBot.ps1" `
+  -RepoPath "C:\Users\Mitra\Documents\GitHub\Mitra-Discord-Bot" `
+  -EnvFileName ".env" `
+  -ConfirmBotStopped `
+  -AutoStash `
+  -VerifyCloudflareWrite
+```
+
+The updater leaves the stash in place for manual review, pulls `main` with
+fast-forward-only Git operations, runs `uv sync --no-dev --frozen`, migrates a
+legacy `cache.json` when present, and validates the package, selected env file,
+TOML, and SQLite database. It always performs a live Cloudflare read when that
+integration is enabled. `-VerifyCloudflareWrite` additionally discovers the
+server's public IPv4, updates every configured A record, and requires a second
+API read to match. After a verified migration, the updater moves the obsolete
+cache into the private external backup so future updates cannot re-import
+stale data.
+
+If both `.env` and `.env.production` exist, `-EnvFileName` is required and must
+match the file used by the service launch command. The updater also honors
+`MITRA_CONFIG_PATH` and `MITRA_STATE_PATH` from that env file. It intentionally
+stops if Cloudflare is enabled but the selected env file lacks a nonempty
+`CLOUDFLARE_API_TOKEN`.
+
+After the updater succeeds, restart the existing service/task. For a foreground
+launch that explicitly uses `.env`:
+
+```powershell
+Set-Location "C:\Users\Mitra\Documents\GitHub\Mitra-Discord-Bot"
+uv run --env-file .env mitra-bot
+```
+
+On startup, Mitra reconciles every configured Cloudflare record even when the
+stored IP has not changed. Confirm the live server result in `bot.log`:
+
+```powershell
+Get-Content .\bot.log -Tail 200 |
+  Select-String -Pattern "Cloudflare DNS readback verified|Cloudflare DNS update complete|Updated DNS record|Failed to.*Cloudflare"
+```
+
+`Updated DNS record` confirms a PATCH was accepted, and `Cloudflare DNS
+readback verified` confirms the configured records were subsequently read at
+the current public IP. If every record already contained that IP, the update
+count is zero and the initial API read serves as the verification.
+
+### Migrating a legacy `cache.json`
+
+The Windows updater performs this automatically. For a standalone migration,
+stop the bot and run a dry run first:
+
+```powershell
+uv run --no-sync mitra-migrate-cache --root . --env-file .env
+```
+
+Apply only after reviewing the plan:
+
+```powershell
+uv run --no-sync mitra-migrate-cache --root . --env-file .env `
+  --apply --confirm-bot-stopped
+```
+
+The migrator copies the Discord token into the selected env file without
+overwriting a modern value, writes bot/UPS/Cloudflare non-secrets to
+`config.toml`, and writes mutable state such as the last IP to `state.db`.
+Legacy Cloudflare Global API Key/email credentials and obsolete command-sync
+state are retained only in the private backup. A scoped token must be supplied
+as `CLOUDFLARE_API_TOKEN`. Unknown fields or conflicting modern values stop the
+migration without changing targets; the source cache is never modified by the
+migrator itself.
+
 ## Configuration
 
 Mitra reads config from `config.toml` and environment variables, and stores mutable runtime data in `state.db`.
