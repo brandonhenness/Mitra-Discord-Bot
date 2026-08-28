@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import discord
@@ -42,3 +43,7 @@ class UpdateMonitorTask:
     @loop.before_loop
     async def before_loop(self) -> None:
         await self.bot.wait_until_ready()
+        # Startup checks are handled explicitly by main according to
+        # ``check_on_startup``. Delay this task's first check so it cannot race
+        # or duplicate that check.
+        await asyncio.sleep(self.interval_seconds)

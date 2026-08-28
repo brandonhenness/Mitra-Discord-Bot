@@ -912,6 +912,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "matplotlib" },
+    { name = "packaging" },
     { name = "py-cord" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -931,6 +932,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.8,<4" },
     { name = "matplotlib", specifier = ">=3.7,<4" },
+    { name = "packaging", specifier = ">=24,<27" },
     { name = "py-cord", specifier = ">=2.4,<3" },
     { name = "pydantic", specifier = ">=2.7,<3" },
     { name = "pydantic-settings", specifier = ">=2.3,<3" },

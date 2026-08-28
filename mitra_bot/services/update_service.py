@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
+from packaging.version import InvalidVersion, Version
 
 from mitra_bot import __version__
 from mitra_bot.storage.storage_store import get_updater_config, set_updater_config
@@ -54,6 +55,11 @@ def get_current_version() -> str:
 def _clean_version(value: str) -> str:
     v = (value or "").strip()
     return v[1:] if v.lower().startswith("v") else v
+
+
+def _is_newer_version(candidate: str, current: str) -> bool:
+    """Return whether a release candidate is newer under PEP 440 ordering."""
+    return Version(_clean_version(candidate)) > Version(_clean_version(current))
 
 
 def _resolve_repo_from_git() -> Optional[str]:
@@ -206,7 +212,17 @@ def check_latest_release() -> UpdateCheckResult:
         )
 
     latest_version = release.version
-    available = _clean_version(latest_version) != _clean_version(current_version)
+    try:
+        available = _is_newer_version(latest_version, current_version)
+    except InvalidVersion as exc:
+        return UpdateCheckResult(
+            current_version=current_version,
+            latest_version=latest_version,
+            available=False,
+            release=release,
+            repo=repo,
+            error=f"Could not compare release versions: {exc}",
+        )
     return UpdateCheckResult(
         current_version=current_version,
         latest_version=latest_version,
