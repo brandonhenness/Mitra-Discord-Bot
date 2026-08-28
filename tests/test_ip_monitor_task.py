@@ -226,6 +226,12 @@ class CloudflareIPUpdateTests(unittest.IsolatedAsyncioTestCase):
                 "proxied": False,
             },
         ]
+        updated_records = [
+            {
+                **records[0],
+                "content": "5.6.7.8",
+            }
+        ]
         config = dict(self.config)
         config["record_ids"] = ["ipv4"]
 
@@ -239,11 +245,14 @@ class CloudflareIPUpdateTests(unittest.IsolatedAsyncioTestCase):
             ) as service_cls,
         ):
             service = service_cls.return_value
-            service.get_dns_records.return_value = records
+            service.get_dns_records.side_effect = [records, updated_records]
             updated = await self.monitor._update_cloudflare_dns("5.6.7.8")
 
         self.assertEqual(updated, 1)
-        service.get_dns_records.assert_called_once_with("zone-1")
+        self.assertEqual(
+            service.get_dns_records.call_args_list,
+            [call("zone-1"), call("zone-1")],
+        )
         self.assertEqual(
             service.update_dns_record.call_args_list,
             [
@@ -286,10 +295,42 @@ class CloudflareIPUpdateTests(unittest.IsolatedAsyncioTestCase):
                 "mitra_bot.tasks.ip_monitor_task.CloudflareService"
             ) as service_cls,
         ):
-            service_cls.return_value.get_dns_records.return_value = [record]
+            service_cls.return_value.get_dns_records.side_effect = [
+                [record],
+                [{**record, "content": "5.6.7.8"}],
+            ]
             await monitor._update_cloudflare_dns("5.6.7.8")
 
         service_cls.assert_called_once_with(api_token="dotenv-token")
+
+    async def test_update_requires_matching_cloudflare_readback(self) -> None:
+        config = dict(self.config)
+        config["record_ids"] = ["ipv4"]
+        old_record = {
+            "id": "ipv4",
+            "type": "A",
+            "name": "home.example.com",
+            "content": "1.1.1.1",
+            "ttl": 1,
+            "proxied": False,
+        }
+
+        with (
+            patch(
+                "mitra_bot.tasks.ip_monitor_task.get_cloudflare_config",
+                return_value=config,
+            ),
+            patch(
+                "mitra_bot.tasks.ip_monitor_task.CloudflareService"
+            ) as service_cls,
+        ):
+            service = service_cls.return_value
+            service.get_dns_records.side_effect = [[old_record], [old_record]]
+            with self.assertRaisesRegex(RuntimeError, "readback"):
+                await self.monitor._update_cloudflare_dns("5.6.7.8")
+
+        service.update_dns_record.assert_called_once()
+        self.assertEqual(service.get_dns_records.call_count, 2)
 
     async def test_missing_configured_record_is_a_retryable_failure(self) -> None:
         config = dict(self.config)

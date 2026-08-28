@@ -188,6 +188,32 @@ class IPMonitorTask:
             )
             updated += 1
 
+        if updated:
+            readback_records = await asyncio.to_thread(
+                service.get_dns_records,
+                cfg.zone_id,
+            )
+            readback_by_id = {
+                str(record.get("id", "")): record for record in readback_records
+            }
+            mismatched_record_ids = [
+                record_id
+                for record_id in cfg.record_ids
+                if record_id not in readback_by_id
+                or str(readback_by_id[record_id].get("content", "")).strip() != ip
+            ]
+            if mismatched_record_ids:
+                mismatched = ", ".join(mismatched_record_ids)
+                raise RuntimeError(
+                    "Cloudflare DNS update readback did not match the public IP for "
+                    f"record_id(s): {mismatched}"
+                )
+
+        logging.info(
+            "Cloudflare DNS readback verified for %s configured record(s).",
+            len(cfg.record_ids),
+        )
+
         logging.info("Cloudflare DNS update complete. Updated %s record(s).", updated)
         return updated
 
