@@ -35,6 +35,15 @@ $RepoPath = [System.IO.Path]::GetFullPath($RepoPath)
 $launcherPath = Join-Path $RepoPath "scripts\Start-MitraBot.ps1"
 $envPath = Join-Path $RepoPath $EnvFileName
 
+# Task Scheduler's password logon type requires a fully qualified UserId.
+# Get-Credential accepts an unqualified local username, but passing that value
+# through to Register-ScheduledTask produces HRESULT 0x80070057 on some
+# Windows versions. Preserve explicitly qualified domain/UPN names and qualify
+# simple local names with this computer's NetBIOS name.
+if ($AccountName -notmatch '[\\@]') {
+    $AccountName = "$env:COMPUTERNAME\$AccountName"
+}
+
 foreach ($requiredPath in @($launcherPath, $envPath, (Join-Path $RepoPath "pyproject.toml"))) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Required file not found: '$requiredPath'."
@@ -47,24 +56,24 @@ $quotedRepo = '"' + $RepoPath.Replace('"', '\"') + '"'
 $quotedEnv = '"' + $EnvFileName.Replace('"', '\"') + '"'
 $arguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $quotedLauncher -RepoPath $quotedRepo -EnvFileName $quotedEnv"
 
-$action = New-ScheduledTaskAction `
-    -Execute $powerShellPath `
-    -Argument $arguments `
-    -WorkingDirectory $RepoPath
-$trigger = New-ScheduledTaskTrigger -AtStartup
-if ($StartupDelaySeconds -gt 0) {
-    $trigger.Delay = "PT${StartupDelaySeconds}S"
-}
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -MultipleInstances IgnoreNew `
-    -RestartCount 3 `
-    -RestartInterval (New-TimeSpan -Minutes 1) `
-    -StartWhenAvailable
-
 if ($PSCmdlet.ShouldProcess($TaskName, "Install Windows startup scheduled task")) {
+    $action = New-ScheduledTaskAction `
+        -Execute $powerShellPath `
+        -Argument $arguments `
+        -WorkingDirectory $RepoPath
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    if ($StartupDelaySeconds -gt 0) {
+        $trigger.Delay = "PT${StartupDelaySeconds}S"
+    }
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 1) `
+        -StartWhenAvailable
+
     $credential = Get-Credential -UserName $AccountName -Message (
         "Enter the Windows password for the account that will run '$TaskName'."
     )

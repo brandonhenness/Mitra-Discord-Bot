@@ -135,6 +135,10 @@ directly to Windows Task Scheduler and is not written to a project file. The
 task runs whether or not the account is logged on, restarts Mitra after a
 failure, and refuses to launch a second instance. Manage it with:
 
+Simple local account names such as `Mitra` are automatically qualified as
+`COMPUTERNAME\Mitra`. A domain-qualified name or user principal name can also
+be supplied directly when applicable.
+
 ```powershell
 Start-ScheduledTask -TaskName "Mitra Discord Bot"
 Stop-ScheduledTask -TaskName "Mitra Discord Bot"
