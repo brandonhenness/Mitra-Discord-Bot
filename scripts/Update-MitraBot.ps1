@@ -198,6 +198,20 @@ function Invoke-UpdaterSelfTest {
     if (Test-MitraOriginUrl "https://github.com/example/Mitra-Discord-Bot.git") {
         throw "Mitra origin rejection self-test failed."
     }
+    $duplicateApplications = @(
+        [pscustomobject]@{ Source = $powershellExe },
+        [pscustomobject]@{ Source = $powershellExe }
+    )
+    $selectedApplication = Select-FirstApplicationPath $duplicateApplications
+    if (
+        $selectedApplication -is [array] -or
+        -not ([string]$selectedApplication).Equals(
+            $powershellExe,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        throw "Duplicate application-path selection self-test failed."
+    }
     Write-Host "Updater syntax/native-capture/redaction self-test: OK" -ForegroundColor Green
 }
 
@@ -672,10 +686,21 @@ function Protect-BackupDirectoryAcl([string]$DirectoryPath) {
     }
 }
 
+function Select-FirstApplicationPath([object[]]$Commands) {
+    foreach ($command in @($Commands)) {
+        $source = ([string]$command.Source).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($source) -and (Test-Path -LiteralPath $source -PathType Leaf)) {
+            return $source
+        }
+    }
+    return $null
+}
+
 function Resolve-GitExe {
-    $command = Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue
-    if ($command -and $command.Source -and (Test-Path -LiteralPath $command.Source)) {
-        return $command.Source
+    $commands = @(Get-Command git.exe -CommandType Application -ErrorAction SilentlyContinue)
+    $resolvedCommand = Select-FirstApplicationPath $commands
+    if ($resolvedCommand) {
+        return $resolvedCommand
     }
 
     $whereResult = Invoke-NativeCapture "where.exe" @("git.exe") ""
@@ -690,9 +715,10 @@ function Resolve-GitExe {
 }
 
 function Resolve-UvExe {
-    $command = Get-Command uv.exe -CommandType Application -ErrorAction SilentlyContinue
-    if ($command -and $command.Source -and (Test-Path -LiteralPath $command.Source)) {
-        return $command.Source
+    $commands = @(Get-Command uv.exe -CommandType Application -ErrorAction SilentlyContinue)
+    $resolvedCommand = Select-FirstApplicationPath $commands
+    if ($resolvedCommand) {
+        return $resolvedCommand
     }
 
     $whereResult = Invoke-NativeCapture "where.exe" @("uv.exe") ""
