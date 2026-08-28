@@ -3,6 +3,7 @@ data.json
 config.toml
 state.db
 state.db-*
+.recovery/
 
 
 # Byte-compiled / optimized / DLL files

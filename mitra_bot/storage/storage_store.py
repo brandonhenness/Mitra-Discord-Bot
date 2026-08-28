@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, Optional, Set
+import threading
+from collections.abc import Awaitable, Callable
+from functools import wraps
+from typing import Any, Dict, Optional, ParamSpec, Set, TypeVar
 
 from mitra_bot.storage.config_store import (
-    ensure_config_file,
+    ConfigFileError,
     read_config_dict,
     write_config_dict,
 )
@@ -31,6 +34,34 @@ _STATE_KEYS = {
     "todo_config",
 }
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_STORAGE_LOCK = threading.RLock()
+
+
+def _storage_locked(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Serialize a complete in-process storage operation."""
+
+    @wraps(func)
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with _STORAGE_LOCK:
+            return func(*args, **kwargs)
+
+    return wrapped
+
+
+def _storage_locked_async(
+    func: Callable[_P, Awaitable[_R]],
+) -> Callable[_P, Awaitable[_R]]:
+    """Serialize async-shaped storage helpers whose bodies perform sync I/O."""
+
+    @wraps(func)
+    async def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with _STORAGE_LOCK:
+            return await func(*args, **kwargs)
+
+    return wrapped
+
 
 def _build_combined_snapshot() -> Dict[str, Any]:
     cfg = read_config_dict()
@@ -47,13 +78,13 @@ def _build_combined_snapshot() -> Dict[str, Any]:
     return combined
 
 
+@_storage_locked
 def read_storage_json() -> Dict[str, Any]:
-    ensure_config_file()
     return normalize_storage_data(_build_combined_snapshot())
 
 
+@_storage_locked
 def write_storage_json(data: Dict[str, Any]) -> None:
-    ensure_config_file()
     normalized = normalize_storage_data(data if isinstance(data, dict) else {})
     cfg = read_config_dict()
 
@@ -82,13 +113,12 @@ def write_storage_json(data: Dict[str, Any]) -> None:
 
 def read_storage_with_defaults() -> Dict[str, Any]:
     """
-    Load combined config/state snapshot and apply schema defaults.
+    Load a combined config/state snapshot and apply in-memory schema defaults.
+
+    Reading is intentionally non-persistent. Call a setter or
+    ``write_storage_json`` when the normalized values should be saved.
     """
-    ensure_config_file()
-    data = read_storage_json()
-    # Ensure defaults persist to config/state stores.
-    write_storage_json(data)
-    return data
+    return read_storage_json()
 
 
 # -----------------------------
@@ -115,11 +145,14 @@ def load_subscribers() -> Set[int]:
             logging.warning("No subscribers found in state store.")
             return set()
         return set(data.get("subscribers", []))
+    except ConfigFileError:
+        raise
     except Exception:
         logging.exception("Failed to load subscribers from state store")
         return set()
 
 
+@_storage_locked_async
 async def save_subscribers(subscribers_set: Set[int]) -> None:
     data = read_storage_json()
     data["subscribers"] = list(subscribers_set)
@@ -138,11 +171,14 @@ async def load_ip() -> Optional[str]:
     try:
         data = read_storage_json()
         return data.get("ip")
+    except ConfigFileError:
+        raise
     except Exception:
         logging.exception("Failed to load ip from state store")
         return None
 
 
+@_storage_locked_async
 async def save_ip(ip: str) -> None:
     data = read_storage_json()
     data["ip"] = ip
@@ -160,6 +196,7 @@ def get_ups_config() -> Dict[str, Any]:
     return ups if isinstance(ups, dict) else {}
 
 
+@_storage_locked
 def set_ups_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     """
     Patch UPS config keys and persist. Returns the new UPS config dict.
@@ -187,6 +224,7 @@ def get_cloudflare_config() -> Dict[str, Any]:
     return cfg
 
 
+@_storage_locked
 def set_cloudflare_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     parsed_patch = normalize_cloudflare_patch(patch)
     data = read_storage_with_defaults()
@@ -215,6 +253,7 @@ def get_notification_channel_id_for_guild(guild_id: int) -> Optional[int]:
         return None
 
 
+@_storage_locked
 def set_notification_channel_id_for_guild(guild_id: int, channel_id: int) -> None:
     data = read_storage_with_defaults()
     notifications = data.get("notifications", {})
@@ -231,6 +270,7 @@ def set_notification_channel_id_for_guild(guild_id: int, channel_id: int) -> Non
     write_storage_json(data)
 
 
+@_storage_locked
 def clear_notification_channel_id_for_guild(guild_id: int) -> None:
     data = read_storage_with_defaults()
     notifications = data.get("notifications", {})
@@ -275,6 +315,7 @@ def get_updater_config() -> Dict[str, Any]:
     return updater if isinstance(updater, dict) else {}
 
 
+@_storage_locked
 def set_updater_config(patch: Dict[str, Any]) -> Dict[str, Any]:
     parsed_patch = normalize_updater_patch(patch)
     data = read_storage_with_defaults()
@@ -297,12 +338,14 @@ def get_power_restart_notice() -> Optional[Dict[str, Any]]:
     return notice if isinstance(notice, dict) else None
 
 
+@_storage_locked
 def set_power_restart_notice(notice: Dict[str, Any]) -> None:
     data = read_storage_json()
     data["power_restart_notice"] = normalize_power_restart_notice_patch(notice)
     write_storage_json(data)
 
 
+@_storage_locked
 def clear_power_restart_notice() -> None:
     data = read_storage_json()
     if "power_restart_notice" in data:
@@ -323,6 +366,7 @@ def get_todos_for_guild(guild_id: int) -> list[Dict[str, Any]]:
     return items if isinstance(items, list) else []
 
 
+@_storage_locked
 def set_todos_for_guild(guild_id: int, items: list[Dict[str, Any]]) -> None:
     data = read_storage_json()
     todo = data.get("todo")
@@ -393,6 +437,7 @@ def get_todo_category_id_for_guild(guild_id: int) -> Optional[int]:
         return None
 
 
+@_storage_locked
 def set_todo_category_id_for_guild(guild_id: int, category_id: int) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)
@@ -413,6 +458,7 @@ def get_todo_list_board_message_id(list_channel_id: int) -> Optional[int]:
         return None
 
 
+@_storage_locked
 def clear_todo_list_board_message_id(list_channel_id: int) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)
@@ -423,6 +469,7 @@ def clear_todo_list_board_message_id(list_channel_id: int) -> None:
     write_storage_json(data)
 
 
+@_storage_locked
 def set_todo_list_board_message_id(list_channel_id: int, message_id: int, *, guild_id: Optional[int] = None) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)
@@ -442,6 +489,7 @@ def get_todo_tasks_for_list_channel(list_channel_id: int) -> list[Dict[str, Any]
     return rows if isinstance(rows, list) else []
 
 
+@_storage_locked
 def set_todo_tasks_for_list_channel(list_channel_id: int, items: list[Dict[str, Any]], *, guild_id: Optional[int] = None) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)
@@ -453,6 +501,7 @@ def set_todo_tasks_for_list_channel(list_channel_id: int, items: list[Dict[str, 
     write_storage_json(data)
 
 
+@_storage_locked
 def clear_todo_tasks_for_list_channel(list_channel_id: int) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)
@@ -474,6 +523,7 @@ def get_todo_hub_channel_id_for_guild(guild_id: int) -> Optional[int]:
         return None
 
 
+@_storage_locked
 def set_todo_hub_channel_id_for_guild(guild_id: int, channel_id: int) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)
@@ -494,6 +544,7 @@ def get_todo_hub_message_id_for_guild(guild_id: int) -> Optional[int]:
         return None
 
 
+@_storage_locked
 def set_todo_hub_message_id_for_guild(guild_id: int, message_id: int) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)
@@ -503,6 +554,7 @@ def set_todo_hub_message_id_for_guild(guild_id: int, message_id: int) -> None:
     write_storage_json(data)
 
 
+@_storage_locked
 def clear_todo_hub_message_id_for_guild(guild_id: int) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)
@@ -512,6 +564,7 @@ def clear_todo_hub_message_id_for_guild(guild_id: int) -> None:
     write_storage_json(data)
 
 
+@_storage_locked
 def remove_todo_list_channel(list_channel_id: int) -> None:
     data = read_storage_json()
     cfg = _todo_cfg(data)

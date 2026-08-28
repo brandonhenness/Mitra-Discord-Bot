@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import threading
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Dict
 
@@ -28,7 +29,7 @@ class StateStore:
         return conn
 
     def _init_db(self) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, closing(self._connect()) as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS meta (
@@ -70,12 +71,12 @@ class StateStore:
         )
 
     def get_meta(self, key: str) -> str | None:
-        with self._lock, self._connect() as conn:
+        with self._lock, closing(self._connect()) as conn:
             row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
             return None if row is None else str(row["value"])
 
     def set_meta(self, key: str, value: str) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, closing(self._connect()) as conn:
             conn.execute(
                 """
                 INSERT INTO meta(key, value)
@@ -87,7 +88,7 @@ class StateStore:
             conn.commit()
 
     def get_json(self, key: str, default: Any) -> Any:
-        with self._lock, self._connect() as conn:
+        with self._lock, closing(self._connect()) as conn:
             row = conn.execute("SELECT value FROM state_kv WHERE key = ?", (key,)).fetchone()
             if row is None:
                 return default
@@ -98,7 +99,7 @@ class StateStore:
 
     def set_json(self, key: str, value: Any) -> None:
         payload = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-        with self._lock, self._connect() as conn:
+        with self._lock, closing(self._connect()) as conn:
             conn.execute(
                 """
                 INSERT INTO state_kv(key, value)
@@ -110,12 +111,12 @@ class StateStore:
             conn.commit()
 
     def delete_key(self, key: str) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, closing(self._connect()) as conn:
             conn.execute("DELETE FROM state_kv WHERE key = ?", (key,))
             conn.commit()
 
     def read_all(self) -> Dict[str, Any]:
-        with self._lock, self._connect() as conn:
+        with self._lock, closing(self._connect()) as conn:
             out: Dict[str, Any] = {}
             for row in conn.execute("SELECT key, value FROM state_kv"):
                 key = str(row["key"])
