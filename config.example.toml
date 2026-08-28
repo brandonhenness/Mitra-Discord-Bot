@@ -19,5 +19,7 @@ timezone = "UTC"
 
 [cloudflare]
 enabled = false
+# Cloudflare zone ID (not the domain name or account ID).
 zone_id = ""
+# IDs of existing A records to maintain (not hostnames; IPv4 only).
 record_ids = []

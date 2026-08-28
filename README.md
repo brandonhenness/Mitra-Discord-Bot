@@ -78,20 +78,22 @@ uv run pytest
 
 Run Cloudflare integration tests (opt-in, live API calls):
 
-```bash
-$env:RUN_CLOUDFLARE_INTEGRATION="1"; uv run pytest -m integration
+```powershell
+$env:RUN_CLOUDFLARE_INTEGRATION="1"
+uv run --env-file .env pytest tests/test_cloudflare_service_integration.py -m integration -q
+Remove-Item Env:RUN_CLOUDFLARE_INTEGRATION -ErrorAction SilentlyContinue
 ```
 
 Run the bot:
 
 ```bash
-uv run mitra-bot
+uv run --env-file .env mitra-bot
 ```
 
 Alternative entrypoint:
 
 ```bash
-uv run python -m mitra_bot.main
+uv run --env-file .env python -m mitra_bot.main
 ```
 
 ## Production
@@ -126,15 +128,15 @@ Mitra reads config from `config.toml` and environment variables, and stores muta
 - `MITRA_STATE_PATH` overrides the state DB path (default: `state.db`).
 - Cloudflare secret is env-only: `CLOUDFLARE_API_TOKEN`.
 
-Using env vars with `uv`:
+Pass the env file explicitly to `uv run`. This makes every setting available to
+the whole process, including path overrides, Discord intent configuration, and
+Cloudflare verification code:
 
 ```bash
-# uv reads .env by default
-uv run mitra-bot
+uv run --env-file .env mitra-bot
 ```
 
 ```bash
-# explicit env file (useful for production)
 uv run --env-file .env.production mitra-bot
 ```
 
@@ -157,6 +159,52 @@ Common `[bot]` keys:
 - `ip_poll_seconds`: IP monitor interval
 - `admin_role_name`: admin role for restricted commands
 - `ip_subscriber_role_name`: role used for IP notifications
+
+### Cloudflare DNS updates
+
+Mitra authenticates to Cloudflare with `CLOUDFLARE_API_TOKEN` as a Bearer API
+token. Create a scoped API token for the intended zone and grant DNS read and
+update access—for example, `Zone / DNS / Edit`, or DNS Read plus DNS Write when
+the token UI exposes separate permissions. Legacy Global API Key and email
+authentication are not supported.
+
+Keep the token in `.env` and enable/configure the non-secret identifiers in
+`config.toml`:
+
+```toml
+[cloudflare]
+enabled = true
+zone_id = "0123456789abcdef0123456789abcdef"
+record_ids = [
+  "11111111111111111111111111111111",
+  "22222222222222222222222222222222",
+]
+```
+
+- `zone_id` is the Cloudflare zone ID for the domain, not the domain name or
+  account ID.
+- `record_ids` contains the exact IDs of existing DNS records to maintain, not
+  hostnames. Configure `A` record IDs only; the current public-IP monitor is
+  IPv4-only and treats other record types as configuration errors.
+- The IDs are available from the Cloudflare dashboard or API. Restrict the API
+  token to the same zone.
+- `enabled = false` disables reconciliation even when the token and IDs are
+  present.
+
+You can safely verify the token and `zone_id` with the opt-in integration test:
+
+```powershell
+$env:RUN_CLOUDFLARE_INTEGRATION="1"
+uv run --env-file .env pytest tests/test_cloudflare_service_integration.py -m integration -q
+Remove-Item Env:RUN_CLOUDFLARE_INTEGRATION -ErrorAction SilentlyContinue
+```
+
+This test is read-only. It verifies that the token can list DNS records and that
+every configured `record_id` exists and refers to an `A` record. It
+does not update a record or prove that the token has edit access. A successful
+check reports `1 passed`; `1 skipped` means the opt-in flag, token, or `zone_id`
+was not available to the test. When the bot runs, missing record IDs or update
+failures are logged and retried without advancing the stored public-IP baseline.
 
 ## Discord Setup Checklist
 
