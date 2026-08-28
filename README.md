@@ -118,6 +118,32 @@ uv run --env-file .env.production mitra-bot
 
 For Windows service/task setups, use the same command after setting required environment variables and ensuring `config.toml` exists.
 
+### Starting automatically on Windows
+
+Double-click `Start-MitraBot.cmd` for a foreground launch with visible errors.
+The launcher resolves the repository location automatically and loads `.env`.
+
+To install an elevated scheduled task that starts Mitra one minute after
+Windows boots, open PowerShell as Administrator in the repository and run:
+
+```powershell
+.\scripts\Install-MitraBotStartup.ps1 -AccountName "Mitra"
+```
+
+Enter that Windows account's password when prompted. The password is passed
+directly to Windows Task Scheduler and is not written to a project file. The
+task runs whether or not the account is logged on, restarts Mitra after a
+failure, and refuses to launch a second instance. Manage it with:
+
+```powershell
+Start-ScheduledTask -TaskName "Mitra Discord Bot"
+Stop-ScheduledTask -TaskName "Mitra Discord Bot"
+Get-ScheduledTaskInfo -TaskName "Mitra Discord Bot"
+```
+
+Stop the scheduled task before using the deployment updater, then start it
+again after the update succeeds.
+
 ### Updating a Windows server
 
 Use [`scripts/Update-MitraBot.ps1`](scripts/Update-MitraBot.ps1) for manual
