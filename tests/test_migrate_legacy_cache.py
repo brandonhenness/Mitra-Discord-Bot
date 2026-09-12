@@ -741,24 +741,30 @@ def test_windows_atomic_replacement_preserves_custom_dacls(tmp_path: Path) -> No
     env_path.write_text("UNRELATED=keep\n", encoding="utf-8")
 
     restrict_acl = r"""
+# Exercise this fixture without PowerShell module autoloading.
+$PSModuleAutoLoadingPreference = "None"
+$ErrorActionPreference = "Stop"
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-$security = New-Object System.Security.AccessControl.FileSecurity
-$security.SetOwner($sid)
+# Change only the DACL under test. Assigning ownership can require privileges
+# unavailable to the hosted runner even when it can edit file permissions.
+# Direct .NET calls avoid PowerShell module discovery across pwsh/Windows
+# PowerShell environments on hosted runners.
+$security = [System.IO.File]::GetAccessControl($target, [System.Security.AccessControl.AccessControlSections]::Access)
 $security.SetAccessRuleProtection($true, $false)
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
     $sid,
     [System.Security.AccessControl.FileSystemRights]::FullControl,
     [System.Security.AccessControl.AccessControlType]::Allow
 )
 [void]$security.AddAccessRule($rule)
-Set-Acl -LiteralPath $target -AclObject $security
+[System.IO.File]::SetAccessControl($target, $security)
 """
 
     def powershell_literal(path: Path) -> str:
         return "'" + str(path).replace("'", "''") + "'"
 
     for path in (config_path, env_path):
-        subprocess.run(
+        result = subprocess.run(
             [
                 "powershell.exe",
                 "-NoProfile",
@@ -766,10 +772,12 @@ Set-Acl -LiteralPath $target -AclObject $security
                 "-Command",
                 f"$target = {powershell_literal(path)}\n{restrict_acl}",
             ],
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
         )
+
+        assert result.returncode == 0, result.stderr
 
     before = {
         path: subprocess.run(
@@ -778,7 +786,11 @@ Set-Acl -LiteralPath $target -AclObject $security
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                f"(Get-Acl -LiteralPath {powershell_literal(path)}).Sddl",
+                "$PSModuleAutoLoadingPreference = 'None'; $ErrorActionPreference = 'Stop'; "
+                f"[System.IO.File]::GetAccessControl({powershell_literal(path)}).GetSecurityDescriptorSddlForm("
+                "[System.Security.AccessControl.AccessControlSections]::Access -bor "
+                "[System.Security.AccessControl.AccessControlSections]::Owner -bor "
+                "[System.Security.AccessControl.AccessControlSections]::Group)",
             ],
             check=True,
             capture_output=True,
@@ -802,7 +814,11 @@ Set-Acl -LiteralPath $target -AclObject $security
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                f"(Get-Acl -LiteralPath {powershell_literal(path)}).Sddl",
+                "$PSModuleAutoLoadingPreference = 'None'; $ErrorActionPreference = 'Stop'; "
+                f"[System.IO.File]::GetAccessControl({powershell_literal(path)}).GetSecurityDescriptorSddlForm("
+                "[System.Security.AccessControl.AccessControlSections]::Access -bor "
+                "[System.Security.AccessControl.AccessControlSections]::Owner -bor "
+                "[System.Security.AccessControl.AccessControlSections]::Group)",
             ],
             check=True,
             capture_output=True,

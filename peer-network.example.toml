@@ -1,0 +1,34 @@
+# Optional. Copy to peer-network.toml, or generate bundles with mitra-peer-init.
+# All members use the SAME Discord token. There are no voting peers or quorum.
+enabled = false
+network_id = "your-independent-private-network"
+node_id = "server-a"
+state_owner = "server-a" # Owner of existing unreplicated To-Do/settings/updater state.
+listen_host = "0.0.0.0"
+listen_port = 9843
+ca_file = "ca.crt"
+cert_file = "node.crt"
+key_file = "node.key"
+state_file = "peer-state.db"
+poll_seconds = 30
+# Health probes run independently of UPS snapshots. /servers monitoring can save
+# a replicated network-wide policy that overrides these initial local defaults.
+health_interval = 10
+health_timeout = 3
+health_failures = 3
+health_down_seconds = 30
+health_startup_grace = 60
+health_recovery_successes = 2
+health_cooldown = 300
+health_raw_days = 7
+health_history_days = 90
+health_incident_days = 365
+
+[[peers]]
+node_id = "server-b"
+host = "192.168.1.12"
+port = 9843
+# Replace with the lowercase SHA-256 of server-b's DER certificate.
+fingerprint = "0000000000000000000000000000000000000000000000000000000000000000"
+# Allows server-b to execute power actions on server-a. Default: false.
+allow_power = false

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 
 import discord
 from discord.ext import tasks
@@ -33,7 +34,7 @@ class UPSMonitorTask:
             return
 
         try:
-            event = cog.poll_for_event()  # type: ignore[attr-defined]
+            event = await asyncio.to_thread(cog.poll_for_event)  # type: ignore[attr-defined]
         except Exception as exc:
             if self._is_no_ups_connected_error(exc):
                 set_ups_config({"enabled": False, "log_enabled": False})
@@ -69,7 +70,8 @@ class UPSMonitorTask:
 
     @loop.before_loop
     async def before_loop(self) -> None:
-        await self.bot.wait_until_ready()
+        if getattr(self.bot, "peer_service", None) is None:
+            await self.bot.wait_until_ready()
 
     @staticmethod
     def _is_no_ups_connected_error(exc: Exception) -> bool:

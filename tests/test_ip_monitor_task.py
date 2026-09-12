@@ -436,6 +436,7 @@ class IPCogNotificationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_legacy_channel_delivery_failure_is_reported(self) -> None:
         bot = Mock()
+        bot.peer_service = None  # Standalone bot, not a mesh follower.
         bot.guilds = []
         bot.state = SimpleNamespace(
             channel_id=123,

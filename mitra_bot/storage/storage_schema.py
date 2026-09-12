@@ -26,7 +26,8 @@ class UPSConfigModel(BaseModel):
     auto_shutdown_delay_seconds: int = 0
     auto_shutdown_force: bool = False
     log_enabled: bool = True
-    log_file: str = "ups_stats.jsonl"
+    log_file: str = "ups_stats.db"
+    database_file: Optional[str] = None
     graph_default_hours: int = 6
     timezone: str = "UTC"
 
@@ -44,6 +45,7 @@ class UPSConfigPatchModel(BaseModel):
     auto_shutdown_force: Optional[bool] = None
     log_enabled: Optional[bool] = None
     log_file: Optional[str] = None
+    database_file: Optional[str] = None
     graph_default_hours: Optional[int] = None
     timezone: Optional[str] = None
 
@@ -77,6 +79,7 @@ class CloudflarePatchModel(BaseModel):
     zone_id: Optional[str] = None
     record_ids: Optional[list[str]] = None
     enabled: Optional[bool] = None
+    targets: Optional[list[dict[str, Any]]] = None
 
     @field_validator("api_token", "zone_id", mode="before")
     @classmethod

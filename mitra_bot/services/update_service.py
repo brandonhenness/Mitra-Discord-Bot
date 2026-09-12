@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -9,6 +11,7 @@ import sys
 import tempfile
 import time
 import zipfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -21,6 +24,7 @@ from mitra_bot.storage.storage_store import get_updater_config, set_updater_conf
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _GITHUB_REMOTE_RE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+)(?:\.git)?$")
+_INSTALL_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -29,6 +33,9 @@ class ReleaseInfo:
     zipball_url: str
     html_url: str
     notes: str
+    sha256: Optional[str] = None
+    checksum_url: Optional[str] = None
+    asset_name: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -87,7 +94,14 @@ def resolve_github_repo() -> Optional[str]:
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
 
-    return _resolve_repo_from_git()
+    repo = _resolve_repo_from_git()
+    if repo:
+        return repo
+    try:
+        repo = json.loads((PROJECT_ROOT / "release.json").read_text(encoding="utf-8")).get("repository")
+        return repo if isinstance(repo, str) and re.fullmatch(r"[\w.-]+/[\w.-]+", repo) else None
+    except (OSError, ValueError):
+        return None
 
 
 def _release_info_from_payload(payload: dict, repo: str) -> Optional[ReleaseInfo]:
@@ -95,6 +109,21 @@ def _release_info_from_payload(payload: dict, repo: str) -> Optional[ReleaseInfo
     zipball_url = str(payload.get("zipball_url") or "").strip()
     html_url = str(payload.get("html_url") or "").strip()
     notes = str(payload.get("body") or "").strip()
+    digest = checksum_url = asset_name = None
+    try:
+        expected = f"mitra-discord-bot-{Version(_clean_version(version))}.zip"
+    except InvalidVersion:
+        expected = ""
+    assets = payload.get("assets") or []
+    for asset in assets:
+        if asset.get("name") == expected and asset.get("browser_download_url"):
+            zipball_url = asset["browser_download_url"]
+            asset_name = expected
+            raw = asset.get("digest") or ""
+            if re.fullmatch(r"sha256:[0-9a-fA-F]{64}", raw):
+                digest = raw[7:].lower()
+            checksum_url = next((a.get("browser_download_url") for a in assets if a.get("name") == "SHA256SUMS"), None)
+            break
 
     if not version or not zipball_url:
         return None
@@ -104,6 +133,9 @@ def _release_info_from_payload(payload: dict, repo: str) -> Optional[ReleaseInfo
         zipball_url=zipball_url,
         html_url=html_url or f"https://github.com/{repo}/releases",
         notes=notes,
+        sha256=digest,
+        checksum_url=checksum_url,
+        asset_name=asset_name,
     )
 
 
@@ -234,34 +266,16 @@ def check_latest_release() -> UpdateCheckResult:
 
 
 def _copy_release_tree(source_root: Path, target_root: Path) -> None:
-    skip_names = {
-        ".git",
-        ".github",
-        "__pycache__",
-        ".ruff_cache",
-        ".pytest_cache",
-        ".mypy_cache",
-        ".env",
-        ".env.production",
-        "config.toml",
-        "state.db",
-        "state.db-shm",
-        "state.db-wal",
-        "bot.log",
-    }
-    for src in source_root.iterdir():
-        if src.name in skip_names:
+    from mitra_bot.release_tools import allowed_file
+    for src in source_root.rglob("*"):
+        relative = src.relative_to(source_root)
+        if not src.is_file() or not (allowed_file(relative.as_posix()) or relative.as_posix() == "release.json"):
             continue
-        dst = target_root / src.name
-        if src.is_dir():
-            shutil.copytree(
-                src,
-                dst,
-                dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns("__pycache__", ".ruff_cache"),
-            )
-        else:
-            shutil.copy2(src, dst)
+        dst = target_root / relative
+        if not dst.resolve().is_relative_to(target_root.resolve()):
+            raise ValueError("Update target contains a path outside the installation")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
 
 
 def _install_requirements() -> None:
@@ -304,7 +318,29 @@ def _install_requirements() -> None:
     )
 
 
+def _startup_preflight(version):
+    # A fresh interpreter catches missing dependencies/import failures without
+    # logging into Discord, starting monitoring, or executing hardware actions.
+    code = (
+        "from mitra_bot import __version__; "
+        "from packaging.version import Version; "
+        "import mitra_bot.main, mitra_bot.setup_wizard, mitra_bot.cloudflare_setup; "
+        f"assert Version(__version__) == Version({version!r})"
+    )
+    subprocess.run([sys.executable, "-c", code], cwd=PROJECT_ROOT,
+                   check=True, capture_output=True, text=True, timeout=60)
+
+
 def install_release(release: ReleaseInfo) -> InstallResult:
+    if not _INSTALL_LOCK.acquire(blocking=False):
+        return InstallResult(ok=False, error="An update is already running on this process.")
+    try:
+        return _install_release(release)
+    finally:
+        _INSTALL_LOCK.release()
+
+
+def _install_release(release: ReleaseInfo) -> InstallResult:
     try:
         with tempfile.TemporaryDirectory(prefix="mitra-update-") as tmpdir:
             tmp_path = Path(tmpdir)
@@ -312,20 +348,65 @@ def install_release(release: ReleaseInfo) -> InstallResult:
 
             dl = requests.get(release.zipball_url, timeout=60)
             dl.raise_for_status()
+            expected_hash = release.sha256
+            if not expected_hash and release.checksum_url:
+                manifest = requests.get(release.checksum_url, timeout=20)
+                manifest.raise_for_status()
+                for line in manifest.text.splitlines():
+                    parts = line.split()
+                    if len(parts) == 2 and parts[1] == release.asset_name and re.fullmatch(r"[0-9a-fA-F]{64}", parts[0]):
+                        expected_hash = parts[0].lower()
+            if release.asset_name and not expected_hash:
+                raise ValueError("Release asset is missing its SHA-256 checksum")
+            if expected_hash and hashlib.sha256(dl.content).hexdigest() != expected_hash:
+                raise ValueError("Release checksum does not match; no files were installed")
             zip_path.write_bytes(dl.content)
 
             extract_dir = tmp_path / "extract"
             extract_dir.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(zip_path) as zf:
+                for entry in zf.infolist():
+                    name = entry.filename
+                    if "\\" in name or ":" in name or not (extract_dir / name).resolve().is_relative_to(extract_dir.resolve()):
+                        raise ValueError("Unsafe path in release archive")
+                    if (entry.external_attr >> 16) & 0o170000 == 0o120000:
+                        raise ValueError("Symlinks are not allowed in release archives")
                 zf.extractall(extract_dir)
 
             roots = [p for p in extract_dir.iterdir() if p.is_dir()]
-            if not roots:
-                return InstallResult(ok=False, error="Downloaded release archive is empty.")
+            if len(roots) != 1:
+                return InstallResult(ok=False, error="Release archive must have exactly one root folder.")
 
             source_root = roots[0]
-            _copy_release_tree(source_root, PROJECT_ROOT)
-            _install_requirements()
+            if release.asset_name:
+                from mitra_bot.release_tools import check
+                check(source_root, release.version)
+            from mitra_bot.services.update_recovery import Recovery
+            recovery = Recovery(source_root, PROJECT_ROOT)
+            dependencies_started = False
+            try:
+                recovery.record("copying")
+                _copy_release_tree(source_root, PROJECT_ROOT)
+                recovery.record("installing_dependencies")
+                dependencies_started = True
+                _install_requirements()
+                recovery.record("checking_imports")
+                _startup_preflight(release.version)
+                recovery.record("validated")
+            except Exception:
+                recovery.failed_stage = recovery.stage
+                try:
+                    recovery.restore()
+                except Exception:
+                    return InstallResult(ok=False, error=f"Update failed and file restoration failed. Keep the bot stopped; recover from {recovery.folder}.")
+                if dependencies_started:
+                    try:
+                        _install_requirements()
+                    except Exception:
+                        recovery.record("dependency_recovery_failed")
+                        return InstallResult(ok=False, error=f"Update failed. Previous files restored, but dependencies need repair. Keep the bot stopped; recovery backup: {recovery.folder}.")
+                recovery.record("rolled_back")
+                return InstallResult(ok=False, error=f"Update failed during {recovery.failed_stage}; previous files restored. Dependency recovery was attempted when needed. Backup: {recovery.folder}.")
 
         set_updater_config(
             {

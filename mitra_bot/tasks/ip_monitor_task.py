@@ -11,6 +11,8 @@ from discord.ext import tasks
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mitra_bot.services.cloudflare_service import CloudflareService
+from mitra_bot.cloudflare_config import select_targets
+from mitra_bot.services.cloudflare_auth import target_token
 from mitra_bot.services.ip_service import get_public_ip
 from mitra_bot.storage.storage_store import get_cloudflare_config, load_ip, save_ip
 
@@ -94,6 +96,24 @@ class IPMonitorTask:
 
     async def _update_cloudflare_dns(self, ip: str) -> int:
         raw_cfg = dict(get_cloudflare_config())
+        if raw_cfg.get("enabled") is not False and raw_cfg.get("targets") is not None:
+            mesh = getattr(self.bot, "peer_service", None)
+            node_id = mesh.config.node_id if mesh is not None else "local"
+            targets = select_targets(raw_cfg["targets"], node_id)
+            updated, failed = 0, []
+            for target in targets:
+                try:
+                    token = await asyncio.to_thread(target_token, target, self.cloudflare_api_token)
+                    cfg = CloudflareDNSUpdateConfig(enabled=True, zone_id=target.zone_id,
+                                                    record_ids=target.record_ids, api_token=token)
+                    updated += await self._update_cloudflare_zone(ip, cfg)
+                except Exception:
+                    # Continue other accounts/zones; retry failed assignments next poll.
+                    logging.exception("Cloudflare target %s failed on server %s", target.name, node_id)
+                    failed.append(target.name)
+            if failed:
+                raise RuntimeError("Cloudflare targets need retry: " + ", ".join(failed))
+            return updated
         if self.cloudflare_api_token:
             # The secret is loaded centrally from .env/real environment by
             # AppSettings and injected in memory. It is never written to config.toml
@@ -102,6 +122,9 @@ class IPMonitorTask:
         if not raw_cfg:
             return 0
         cfg = CloudflareDNSUpdateConfig.model_validate(raw_cfg)
+        return await self._update_cloudflare_zone(ip, cfg)
+
+    async def _update_cloudflare_zone(self, ip: str, cfg: CloudflareDNSUpdateConfig) -> int:
 
         if not cfg.enabled:
             logging.info("Cloudflare DNS update is disabled in config.")
@@ -291,4 +314,5 @@ class IPMonitorTask:
 
     @loop.before_loop
     async def before_loop(self) -> None:
-        await self.bot.wait_until_ready()
+        if getattr(self.bot, "peer_service", None) is None:
+            await self.bot.wait_until_ready()

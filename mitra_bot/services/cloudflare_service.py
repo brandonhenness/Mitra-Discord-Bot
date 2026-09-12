@@ -55,31 +55,27 @@ class CloudflareService:
 
         logging.debug("Cloudflare %s %s", method, url)
 
-        response = requests.request(
-            method,
-            url,
-            headers=self._headers,
-            params=params,
-            json=json_body,
-            timeout=timeout,
-        )
+        try:
+            response = requests.request(
+                method, url, headers=self._headers, params=params,
+                json=json_body, timeout=timeout,
+            )
+        except requests.RequestException:
+            raise RuntimeError("Cloudflare request failed; check connectivity and account authorization.") from None
 
         try:
             raw = response.json()
         except Exception:
-            logging.error("Cloudflare returned non-JSON response.")
-            response.raise_for_status()
-            raise
+            raise RuntimeError("Cloudflare returned a non-JSON response.") from None
 
         try:
             data = CloudflareAPIEnvelope.model_validate(raw)
         except ValidationError:
-            logging.error("Cloudflare API response schema validation failed: %s", raw)
-            raise
+            raise RuntimeError("Cloudflare returned an invalid API response.") from None
 
         if not data.success:
-            logging.error("Cloudflare API error: %s", raw)
-            raise RuntimeError(f"Cloudflare API error: {raw}")
+            codes = [str(item.get("code", "unknown")) for item in data.errors]
+            raise RuntimeError("Cloudflare API error (codes: " + ", ".join(codes) + "). Check token scope and zone access.")
 
         return data.model_dump(mode="json")
 
@@ -91,14 +87,25 @@ class CloudflareService:
         """
         Return all zones available to the API token.
         """
-        data = self._request("GET", "/zones")
         out: List[Dict[str, Any]] = []
-        for raw in data.get("result", []):
-            try:
-                out.append(CloudflareZone.model_validate(raw).model_dump(mode="json"))
-            except ValidationError:
-                logging.debug("Skipping invalid Cloudflare zone payload: %s", raw)
+        page = 1
+        while True:
+            data = self._request("GET", "/zones", params={"page": page, "per_page": 50})
+            for raw in data.get("result", []):
+                try:
+                    out.append(CloudflareZone.model_validate(raw).model_dump(mode="json"))
+                except ValidationError:
+                    logging.debug("Skipping invalid Cloudflare zone payload")
+            if page >= int((data.get("result_info") or {}).get("total_pages", 1)):
+                break
+            page += 1
         return out
+
+    def create_dns_record(self, zone_id: str, *, name: str, content: str, proxied: bool = False):
+        data = self._request("POST", f"/zones/{zone_id}/dns_records", json_body={
+            "type": "A", "name": name, "content": content, "ttl": 1, "proxied": proxied,
+        })
+        return CloudflareDNSRecord.model_validate(data["result"]).model_dump(mode="json")
 
     def get_dns_records(self, zone_id: str) -> List[Dict[str, Any]]:
         """

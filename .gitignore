@@ -5,6 +5,8 @@ config.toml
 state.db
 state.db-*
 *.jsonl
+*.db
+*.db-*
 .recovery/
 
 
@@ -192,3 +194,9 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Private mesh credentials and per-node telemetry / request journals
+peer-network.toml
+peer-state.db*
+peer-bundles/
+*.key

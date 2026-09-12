@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -44,6 +45,7 @@ class TrippliteUPSClient:
 
     def __init__(self) -> None:
         self._battery: Optional[Any] = None  # Battery instance
+        self._io_lock = threading.RLock()
 
     @property
     def available(self) -> bool:
@@ -73,6 +75,10 @@ class TrippliteUPSClient:
             self._battery = None
 
     def get_status(self) -> Dict[str, Any]:
+        with self._io_lock:
+            return self._read_status()
+
+    def _read_status(self) -> Dict[str, Any]:
         """
         Returns the dict from tripplite.Battery.get()
         """

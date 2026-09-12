@@ -100,6 +100,7 @@ def write_storage_json(data: Dict[str, Any]) -> None:
         "enabled": bool(cloudflare.get("enabled", False)),
         "zone_id": cloudflare.get("zone_id"),
         "record_ids": cloudflare.get("record_ids", []) if isinstance(cloudflare.get("record_ids"), list) else [],
+        "targets": cloudflare.get("targets"),
     }
     write_config_dict(cfg)
 

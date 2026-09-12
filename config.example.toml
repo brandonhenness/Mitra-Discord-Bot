@@ -13,11 +13,13 @@ auto_shutdown_action = "shutdown"
 auto_shutdown_delay_seconds = 0
 auto_shutdown_force = false
 log_enabled = true
-log_file = "ups_stats.jsonl"
+database_file = "ups_stats.db"
 graph_default_hours = 6
 timezone = "UTC"
 
 [cloudflare]
+# Legacy single-zone setup below remains supported. For per-server assignments,
+# use `mitra-cloudflare-setup` or see docs/cloudflare.md for [[cloudflare.targets]].
 enabled = false
 # Cloudflare zone ID (not the domain name or account ID).
 zone_id = ""

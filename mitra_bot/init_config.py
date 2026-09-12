@@ -26,7 +26,13 @@ def main() -> None:
         action="store_true",
         help="Overwrite existing target files.",
     )
+    parser.add_argument("--guided",action="store_true",help="Run the interactive Discord/private-network setup wizard")
+    parser.add_argument("--no-browser",action="store_true",help="Print setup URLs without opening a browser")
     args = parser.parse_args()
+    if args.guided:
+        from mitra_bot.setup_wizard import guided_setup
+        guided_setup(open_browser=not args.no_browser)
+        return
 
     root = Path.cwd()
     ops = [

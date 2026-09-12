@@ -17,6 +17,9 @@ from mitra_bot.storage.storage_store import (
     get_updater_config,
 )
 from mitra_bot.settings import load_settings
+from mitra_bot.peer_config import load_peer_config
+from mitra_bot.services.peer_service import PeerService
+from mitra_bot.services.power_service import execute_power_action
 from mitra_bot.services.role_manager import ensure_role
 from mitra_bot.tasks.ip_monitor_task import IPMonitorTask
 from mitra_bot.tasks.update_monitor_task import UpdateMonitorTask
@@ -35,6 +38,57 @@ async def main_async() -> None:
     )
 
     bot = create_bot(state=state)
+
+    peer_config = load_peer_config()
+    peer_service = None
+    if peer_config.enabled:
+        ups_cog = bot.get_cog("UPSCog")
+        if ups_cog is None:
+            raise RuntimeError("Private networking requires UPSCog to be loaded")
+
+        async def peer_power(request):
+            message = await asyncio.to_thread(
+                execute_power_action, request.action,
+                delay_seconds=request.delay_seconds, force=request.force,
+            )
+            if request.action == "cancel":
+                clear_power_restart_notice()
+            return message
+
+        peer_service = PeerService(
+            peer_config,
+            snapshot=lambda: ups_cog.peer_snapshot(peer_config.node_id),
+            power=peer_power,
+        )
+        bot.peer_service = peer_service
+        peer_service.configure_discord_identity(settings.token)
+        peer_service.health_provider = lambda: {"discord_connected": bot.gateway_connected}
+        bot.auto_sync_commands = peer_service.is_state_owner
+
+        async def deliver_notification(source, notification):
+            if not bot.is_ready():
+                raise RuntimeError("This node has not connected to Discord yet")
+            message = f"[{source}] {notification.message}"
+            if notification.channel_id:
+                channel = bot.get_channel(notification.channel_id) or await bot.fetch_channel(notification.channel_id)
+                if notification.mention_ip_subscribers and getattr(channel, "guild", None):
+                    role = discord.utils.get(channel.guild.roles, name=settings.ip_subscriber_role_name)
+                    if role:
+                        if not role.mentionable:
+                            await role.edit(mentionable=True, reason="Mitra IP change notification")
+                        message = f"{role.mention}\n{message}"
+                await channel.send(message)
+            elif notification.user_id:
+                user = await bot.fetch_user(notification.user_id)
+                await user.send(message)
+            else:
+                raise ValueError("A notification requires a destination")
+
+        peer_service.notification_sink = deliver_notification
+        from mitra_bot.services.peer_alerts import PeerAlertDelivery
+        peer_service.monitor_alert_sink = PeerAlertDelivery(bot, peer_service)
+        from mitra_bot.discord_app.peer_operations import SharedDashboard
+        peer_service.monitor_dashboard_sink = SharedDashboard(bot, peer_service)
 
     ip_task = IPMonitorTask(
         bot,
@@ -138,10 +192,18 @@ async def main_async() -> None:
         )
 
     @bot.event
+    async def on_disconnect():
+        bot.gateway_connected = False
+
+    @bot.event
+    async def on_resumed():
+        bot.gateway_connected = True
+
+    @bot.event
     async def on_ready():
+        bot.gateway_connected = True
         if started["done"]:
             return
-        started["done"] = True
 
         logging.info(
             "Logged in as %s (id=%s)",
@@ -155,9 +217,10 @@ async def main_async() -> None:
             )
 
         # Ensure roles exist in every guild the bot is in
-        for guild in bot.guilds:
-            await ensure_role(guild, settings.admin_role_name)
-            await ensure_role(guild, settings.ip_subscriber_role_name)
+        if bot.owns_application_state:
+            for guild in bot.guilds:
+                await ensure_role(guild, settings.admin_role_name)
+                await ensure_role(guild, settings.ip_subscriber_role_name)
 
         logging.info(
             "Starting tasks: ip_monitor=%ss ups_monitor=%ss update_monitor=%ss",
@@ -165,12 +228,15 @@ async def main_async() -> None:
             settings.ups.poll_seconds,
             int(updater_cfg.get("check_interval_seconds", 21600)),
         )
-        await ip_task.start()
-        await ups_task.start()
-        await update_task.start()
+        if peer_service is None:
+            await ip_task.start()
+            await ups_task.start()
+        if not update_task.loop.is_running():
+            await update_task.start()
+        started["done"] = True
         logging.info("Background tasks started.")
 
-        if bool(updater_cfg.get("enabled", True)) and bool(
+        if bot.owns_application_state and bool(updater_cfg.get("enabled", True)) and bool(
             updater_cfg.get("check_on_startup", True)
         ):
             update_cog = bot.get_cog("UpdateCog")
@@ -266,6 +332,11 @@ async def main_async() -> None:
         logging.info("To-Do lists are managed via per-guild To-Do category and list channels.")
 
     try:
+        if peer_service:
+            await peer_service.start()
+            # Hardware monitoring starts even before this node's Discord login.
+            await ip_task.start()
+            await ups_task.start()
         await bot.start(settings.token)
     except RuntimeError as exc:
         if getattr(bot, "_mitra_restart_requested", False) and "Session is closed" in str(
@@ -276,6 +347,12 @@ async def main_async() -> None:
             )
             return
         raise
+    finally:
+        for monitor in (ip_task, ups_task, update_task):
+            monitor.loop.cancel()
+        if peer_service:
+            await peer_service.close()
+        await bot.close()
 
 
 def main() -> None:
