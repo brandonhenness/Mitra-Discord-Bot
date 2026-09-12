@@ -269,7 +269,12 @@ def test_pin_command_saves_shared_message_and_stop_persists_without_deleting():
         m = monitor()
         channel,bot,guild = channel_and_bot(m)
         message = SimpleNamespace(id=999,jump_url="https://discord.com/channels/123/456/999",pin=AsyncMock())
-        channel.send = AsyncMock(return_value=message)
+        # Python 3.10 cannot inspect an unspecced AsyncMock's synthetic code
+        # object. Use a real async function signature, as the Discord API has.
+        from unittest.mock import create_autospec
+        async def send(*, nonce, **kwargs):
+            return message
+        channel.send = create_autospec(send, side_effect=send)
         ctx = SimpleNamespace(guild=guild,interaction=SimpleNamespace(id=200),defer=AsyncMock(),respond=AsyncMock())
         cog = ServersCog(bot)
         cog._mesh = AsyncMock(return_value=m.mesh)
