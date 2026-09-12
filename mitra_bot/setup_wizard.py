@@ -119,10 +119,10 @@ def yes(prompt,default=True):
     return default if not answer else answer in {"y","yes"}
 
 
-def choose(prompt,items,label):
-    ui.choices(label(item) for item in items)
+def choose(prompt,items,label, *, default=1):
+    ui.choices(str(label(item)) + (" (default)" if index == default else "") for index,item in enumerate(items,1))
     while True:
-        answer = ui.ask(prompt+" [1; 0 skips]: ").strip() or "1"
+        answer = ui.ask(prompt+f" [{default}; 0 keeps existing/skips]: ").strip() or str(default)
         if answer.isdigit() and 0 <= int(answer) <= len(items):
             return items[int(answer)-1] if int(answer) else None
         ui.message("Choose one of the listed numbers.")
@@ -209,12 +209,26 @@ def guided_setup(*,env_file=".env",open_browser=True):
     guilds = discord_installation(api, application, browse)
     ui.step("Server & notifications", 2, 5, purpose="Choose the Discord community and channel for alerts, then configure who can use administrative commands.")
     cfg = read_config_dict()
-    guild = choose("Discord server",guilds,lambda item:item["name"]) if guilds else None
+    saved_guild = cfg["bot"].get("guild_id")
+    if not saved_guild and cfg["bot"].get("channel_id"):
+        try:
+            saved_guild = int(api.request("GET", f"/channels/{cfg['bot']['channel_id']}")["guild_id"])
+        except (RuntimeError, KeyError, TypeError, ValueError):
+            ui.message("Could not identify the saved channel's Discord server. Existing settings will be kept unless you select a server.")
+    default_guild = next((i for i,g in enumerate(guilds,1) if str(g["id"]) == str(saved_guild)),
+                         0 if saved_guild or cfg["bot"].get("channel_id") else 1)
+    guild = choose("Discord server",guilds,lambda item:item["name"], default=default_guild) if guilds else None
     if guild:
         guild_id = str(guild["id"])
+        cfg["bot"]["guild_id"] = int(guild_id)
         detail = api.request("GET",f"/guilds/{guild_id}")
         channels = [c for c in api.request("GET",f"/guilds/{guild_id}/channels") if c["type"] == 0]
-        channel = choose("Default notification channel",channels,lambda item:"#"+item["name"]) if channels else None
+        from mitra_bot.storage.storage_store import get_notification_channel_id_for_guild
+        saved_channel = get_notification_channel_id_for_guild(int(guild_id))
+        if not saved_channel and str(saved_guild) == guild_id:
+            saved_channel = cfg["bot"].get("channel_id")
+        default_channel = next((i for i,c in enumerate(channels,1) if str(c["id"]) == str(saved_channel)), 0 if saved_channel else 1)
+        channel = choose("Default notification channel",channels,lambda item:"#"+item["name"], default=default_channel) if channels else None
         if channel:
             cfg["bot"]["channel_id"] = int(channel["id"])
             from mitra_bot.storage.storage_store import set_notification_channel_id_for_guild

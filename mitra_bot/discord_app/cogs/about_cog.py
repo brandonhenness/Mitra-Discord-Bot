@@ -30,7 +30,9 @@ class AboutCog(commands.Cog):
                 embed = discord.Embed(title="Mitra Bot · network", color=discord.Color.blurple())
                 for node, data in results[start:start+8]:
                     value = "Unavailable: check connectivity and node version."
-                    if data:
+                    if data and data.get("error"):
+                        value = "Unavailable: " + data["error"]
+                    elif data:
                         health = data.get("health", {})
                         uptime = health.get("process_uptime_seconds", 0)
                         value = (f"Version `{data['version']}` · Python `{data['python']}` · Py-Cord `{data['pycord']}`\n"

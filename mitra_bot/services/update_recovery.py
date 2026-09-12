@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import shutil
 import uuid
+import re
+import time
 from pathlib import Path
 
 from mitra_bot.release_tools import allowed_file
@@ -29,6 +31,39 @@ def safe_target(root, relative):
         if parent.is_symlink():
             raise ValueError("Update target contains a linked directory")
     return path
+
+
+def prune_successful_backups(root, *, keep=3, days=30, now=None):
+    """Retain recent successful rollbacks and every unfinished/failed backup."""
+    root = Path(root).resolve()
+    directory = root / ".recovery"
+    if directory.resolve() != directory or not directory.is_dir():
+        return []
+    now = time.time() if now is None else now
+    candidates = []
+    for folder in directory.iterdir():
+        if not re.fullmatch(r"update-[a-f0-9]{32}", folder.name) or folder.resolve() != folder or not folder.is_dir():
+            continue
+        manifest = folder / "manifest.json"
+        try:
+            if manifest.resolve() != manifest or json.loads(manifest.read_text(encoding="utf-8")).get("stage") != "validated":
+                continue
+            candidates.append((manifest.stat().st_mtime, folder))
+        except (OSError, ValueError):
+            continue
+    removed = []
+    for stamp, folder in sorted(candidates, reverse=True)[max(3, keep):]:
+        if stamp >= now - max(1, days)*86400:
+            continue
+        # Verify the exact absolute tree before any recursive deletion. Linked
+        # files/directories (including Windows junctions) are never traversed.
+        if any(p.resolve() != p or not p.resolve().is_relative_to(folder) for p in folder.rglob("*")):
+            continue
+        if folder.resolve().parent != directory:
+            continue
+        shutil.rmtree(folder)
+        removed.append(folder.name)
+    return removed
 
 
 class Recovery:

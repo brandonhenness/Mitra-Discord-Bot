@@ -422,6 +422,11 @@ def _install_release(release: ReleaseInfo) -> InstallResult:
                 "last_notified_version": release.version,
             }
         )
+        try:
+            from mitra_bot.services.update_recovery import prune_successful_backups
+            prune_successful_backups(PROJECT_ROOT)
+        except OSError:
+            logging.warning("Old successful update backups could not be pruned", exc_info=True)
         return InstallResult(ok=True, version=release.version)
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()

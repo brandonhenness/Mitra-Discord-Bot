@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 from typing import Optional
 
 
@@ -65,6 +66,7 @@ def setup_logging(
     # Prevent duplicate handlers if setup_logging is called more than once
     for h in list(root_logger.handlers):
         root_logger.removeHandler(h)
+        h.close()
 
     root_logger.setLevel(level)
 
@@ -73,7 +75,7 @@ def setup_logging(
     root_logger.addHandler(console)
 
     if add_file_handler:
-        file_handler = logging.FileHandler(logfile)
+        file_handler = RotatingFileHandler(logfile, maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
         file_formatter = logging.Formatter(
             "[%(asctime)s] [%(levelname)-8s] %(name)s: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",

@@ -41,7 +41,7 @@ class IPCog(commands.Cog):
             return
         results = await read_nodes(self.bot, nodes, "public_ip")
         lines = [f"**{node}**: " + (f"`{data['ip']}`" if data and data.get("ip") else
-                 "Unavailable: check connectivity, node version, or public-IP lookup.") for node, data in results]
+                 "Unavailable: " + (data.get("error", "Public-IP lookup failed.") if data else "Public-IP lookup failed.")) for node, data in results]
         for start in range(0, len(lines), 8):
             await ctx.respond("\n".join(lines[start:start+8]), ephemeral=True,
                               allowed_mentions=discord.AllowedMentions.none())

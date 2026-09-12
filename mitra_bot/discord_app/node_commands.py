@@ -32,7 +32,25 @@ async def node_operation(bot, target, operation, payload=None):
     payload = payload or {}
     if mesh and target != mesh.config.node_id:
         # Public-IP discovery has its own ten-second HTTP timeout.
-        return await mesh.request(target, operation, payload, timeout=15)
+        try:
+            return await mesh.request(target, operation, payload, timeout=15)
+        except PeerError as original:
+            if original.__cause__ is not None:
+                raise
+            # Distinguish a reachable older peer from a broken connection.
+            try:
+                capability = await mesh.request(target, "capabilities", {}, timeout=3)
+            except PeerError:
+                try:
+                    await mesh.request(target, "health", {}, timeout=3)
+                except PeerError:
+                    raise original
+                raise PeerError(f"{target} is reachable but rejected {operation} and cannot advertise feature support. "
+                                "Update this node to the same release, then retry.") from original
+            if operation not in capability.get("operations", []):
+                raise PeerError(f"{target} (version {capability.get('version', 'unknown')}) does not support {operation}. "
+                                "Update that node before using this command.") from original
+            raise original
     return await local_operation(bot, operation, payload)
 
 
@@ -50,6 +68,6 @@ async def read_nodes(bot, nodes, operation):
         async with semaphore:
             try:
                 return node, await node_operation(bot, node, operation)
-            except PeerError:
-                return node, None
+            except PeerError as exc:
+                return node, {"error": str(exc)}
     return await asyncio.gather(*(read(node) for node in nodes))

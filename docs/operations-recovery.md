@@ -1,5 +1,40 @@
 # Operations, recovery and beta acceptance
 
+## Reconnection, compatibility and retention
+
+Peer requests resolve the configured hostname for each new TCP/TLS connection;
+Mitra does not pin its first DNS answer. A regression test moves a real TLS peer
+between two loopback IPs and verifies another request reaches the same running
+node after the DNS answer changes. OS/resolver caching and the DNS record's TTL
+still affect how quickly a public address change becomes visible. Use DNS-only
+records and keep the relevant port forwarded at the current address.
+
+New node commands distinguish a reachable peer that lacks feature support from
+a transport failure. Upgrade the named peer when instructed. A peer that advertises
+support but rejects a command keeps its original rejection message rather than
+being mislabeled as outdated. Capabilities are queried separately from health,
+so older strict health-message parsers continue to work.
+
+Retention policy:
+
+- `bot.log` rotates at 10 MiB, retaining five older files (about 60 MiB total).
+- Peer raw observations retain 7 days, rollups 90 days and recovered incidents
+  365 days by default; these are configurable in `peer-network.toml`.
+  Undelivered alerts and unresolved incidents are preserved. SQLite reuses freed
+  pages; pruning is not a promise that the database file immediately shrinks.
+- Update downloads use temporary directories and are removed after normal
+  completion or handled failure.
+- After a successful install, successful-update recovery folders older than
+  30 days are removed, retaining at least the newest three. Failed, unfinished,
+  malformed, linked and manually created backup folders are never auto-deleted.
+- Manual node backups and UPS history remain operator-managed. Keep verified
+  recent backups plus an off-machine copy, and review older copies periodically.
+  The updater does not remove your recovery credentials or UPS history.
+
+Rerunning setup defaults to the saved Discord guild and its notification channel,
+even if API ordering changes. If a saved selection is unavailable, the default
+is to keep existing settings instead of silently choosing the first result.
+
 ## Rolling updates
 
 `/update check` defaults to all configured nodes. Confirming Install creates a

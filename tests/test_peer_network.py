@@ -421,3 +421,31 @@ def test_membership_add_remove_and_apply_preserve_existing_identity(bundles, tmp
     assert not (removed/"d").exists()
     with pytest.raises(ValueError, match="state owner"):
         prepare(added, tmp_path/"bad", remove="a")
+
+
+def test_hostname_reconnects_after_dns_address_changes_without_process_restart(bundles, tmp_path, monkeypatch):
+    async def run():
+        async with mesh(bundles, tmp_path) as nodes:
+            a, b = nodes["a"], nodes["b"]
+            loop = asyncio.get_running_loop()
+            original = loop.getaddrinfo
+            address, queries = ["127.0.0.1"], []
+            async def resolve(host, port, *args, **kwargs):
+                if host == "dynamic-peer.example":
+                    queries.append(address[0])
+                    host = address[0]
+                return await original(host, port, *args, **kwargs)
+            monkeypatch.setattr(loop, "getaddrinfo", resolve)
+            a.peers["b"].host = "dynamic-peer.example"
+            assert (await a.request("b", "health", {}))["node_id"] == "b"
+            old_boot = b.boot_id
+            port = b.server.sockets[0].getsockname()[1]
+            b.server.close()
+            await b.server.wait_closed()
+            server_ssl, _ = b._tls_contexts()
+            b.server = await asyncio.start_server(b._accept, "127.0.0.2", port, ssl=server_ssl)
+            address[0] = "127.0.0.2"
+            health = await a.request("b", "health", {})
+            assert health["boot_id"] == old_boot
+            assert queries == ["127.0.0.1", "127.0.0.2"]
+    asyncio.run(run())

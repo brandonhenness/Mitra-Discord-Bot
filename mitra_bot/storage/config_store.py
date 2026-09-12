@@ -51,6 +51,7 @@ class BotFileConfigModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     channel_id: int | None = None
+    guild_id: int | None = Field(default=None, ge=1)
     ip_poll_seconds: int = 900
     admin_role_name: str = "Mitra Admin"
     ip_subscriber_role_name: str = "Mitra Alerts"
