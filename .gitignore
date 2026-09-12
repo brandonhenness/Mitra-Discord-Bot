@@ -199,6 +199,15 @@ cython_debug/
 peer-network.toml
 /ca.crt
 /node.crt
+*.crt
+*.cer
+*.pem
+*.p12
+*.pfx
+*.csr
+*.srl
+*.log.*
+*.before-membership-*
 peer-state.db*
 peer-bundles/
 *.key
