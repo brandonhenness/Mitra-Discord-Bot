@@ -20,6 +20,9 @@ class UpdateMonitorTask:
 
     @tasks.loop(seconds=21600)
     async def loop(self) -> None:
+        mesh = getattr(self.bot, "peer_service", None)
+        if mesh is not None and (not mesh.is_state_owner or not self.bot.is_ready()):
+            return
         cfg = get_updater_config()
         enabled = bool(cfg.get("enabled", True))
         desired_interval = max(60, int(cfg.get("check_interval_seconds", 21600)))

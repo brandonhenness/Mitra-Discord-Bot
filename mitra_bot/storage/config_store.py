@@ -13,6 +13,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
 import tomli_w
+from mitra_bot.cloudflare_config import CloudflareTarget
 
 
 class ConfigFileError(RuntimeError):
@@ -31,7 +32,8 @@ class UPSFileConfigModel(BaseModel):
     auto_shutdown_delay_seconds: int = 0
     auto_shutdown_force: bool = False
     log_enabled: bool = True
-    log_file: str = "ups_stats.jsonl"
+    log_file: str = "ups_stats.db"  # Legacy configuration alias.
+    database_file: str | None = None
     graph_default_hours: int = 6
     timezone: str = "UTC"
 
@@ -42,6 +44,7 @@ class CloudflareFileConfigModel(BaseModel):
     enabled: bool = False
     zone_id: str | None = None
     record_ids: list[str] = Field(default_factory=list)
+    targets: list[CloudflareTarget] | None = None
 
 
 class BotFileConfigModel(BaseModel):

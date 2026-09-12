@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 import re
+import asyncio
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import discord
 from discord.ext import commands
-from pathlib import Path
 
 from mitra_bot.discord_app.checks import ensure_admin
+from mitra_bot.discord_app.server_target import resolve_server
+from mitra_bot.services.peer_service import PeerError
 from mitra_bot.services.ups.tripplite_client import TrippliteUPSClient
 from mitra_bot.services.ups.ups_log import UPSLogStore
 from mitra_bot.services.ups.ups_graph import build_ups_status_graph
@@ -188,7 +192,8 @@ class UPSCog(commands.Cog):
 
         self.client = TrippliteUPSClient()
         self.log_store = UPSLogStore(
-            log_file=str(ups_cfg.get("log_file", "ups_stats.jsonl")),
+            log_file=str(ups_cfg.get("log_file", "ups_stats.db")),
+            database_file=ups_cfg.get("database_file"),
             timezone_name=str(ups_cfg.get("timezone", "UTC")),
             history_limit=int(ups_cfg.get("history_limit", 5000)),
         )
@@ -227,9 +232,7 @@ class UPSCog(commands.Cog):
         ups_cfg = get_ups_config()
 
         # Update log store configuration
-        self.log_store.log_path = (
-            Path(str(ups_cfg.get("log_file", "ups_stats.jsonl"))).expanduser().resolve()
-        )
+        self.log_store.configure(log_file=str(ups_cfg.get("log_file", "ups_stats.db")),database_file=ups_cfg.get("database_file"))
         self.log_store.timezone_name = str(ups_cfg.get("timezone", "UTC"))
 
         # Update service config
@@ -304,6 +307,7 @@ class UPSCog(commands.Cog):
             min_value=1,
             max_value=168,
         ),
+        server: str = discord.Option(str, description="Server ID from /servers list (default: configured state owner)", required=False, default=None),
     ):
         admin_guard = ensure_admin(ctx)
         if admin_guard:
@@ -311,6 +315,16 @@ class UPSCog(commands.Cog):
             return
 
         await ctx.defer(ephemeral=True)
+
+        try:
+            target = resolve_server(self.bot, server)
+        except PeerError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+        mesh = getattr(self.bot, "peer_service", None)
+        if mesh is not None and target != mesh.config.node_id:
+            await self._remote_status(ctx, mesh, target, hours)
+            return
 
         ups_cfg = self._reload_from_cache()
         tz_name = str(ups_cfg.get("timezone", "UTC"))
@@ -325,7 +339,7 @@ class UPSCog(commands.Cog):
 
         # Get a live snapshot for rich stats (this is what your old command did)
         try:
-            live = self.client.get_status()
+            live = await asyncio.to_thread(self.client.get_status)
         except Exception:
             live = {}
 
@@ -400,7 +414,7 @@ class UPSCog(commands.Cog):
 
         color = discord.Color.orange() if on_battery else discord.Color.green()
         embed = discord.Embed(
-            title="UPS Status",
+            title=f"UPS Status — {target}",
             description=f"Monitoring: `enabled={ups_cfg.get('enabled', True)}` | `poll={ups_cfg.get('poll_seconds', 30)}s`",
             color=color,
         )
@@ -453,6 +467,58 @@ class UPSCog(commands.Cog):
                 content="No graph data available yet.",
                 ephemeral=True,
             )
+
+    def peer_snapshot(self, node_id: str) -> dict:
+        cfg = self._reload_from_cache()
+        live = {}
+        if self.client.available:
+            try:
+                live = self.client.get_status()
+            except Exception:
+                pass
+        return dict(
+            node_id=node_id, captured_at=int(time.time()), available=self.client.available,
+            live=live if isinstance(live, dict) else {},
+            rows=self.log_store.get_recent(hours=168)[-5000:],
+            timezone=str(cfg.get("timezone", "UTC")), enabled=bool(cfg.get("enabled", True)),
+            poll_seconds=int(cfg.get("poll_seconds", 30)),
+        )
+
+    async def _remote_status(self, ctx, mesh, target, hours):
+        try:
+            snapshot, stale = await mesh.snapshot(target)
+        except PeerError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
+        window = int(hours or 6)
+        # An offline graph is relative to capture time, so old data stays visible.
+        end = datetime.fromtimestamp(snapshot["captured_at"], tz=timezone.utc)
+        cutoff = end - timedelta(hours=window)
+        rows = []
+        for row in snapshot["rows"]:
+            try:
+                ts = datetime.fromisoformat(str(row.get("ts", "")).replace("Z", "+00:00"))
+                if cutoff <= ts <= end:
+                    rows.append(row)
+            except (ValueError, TypeError):
+                continue
+        live = snapshot["live"]
+        embed = discord.Embed(
+            title=f"UPS Status — {target}",
+            description=("**OFFLINE / UNREACHABLE — cached data**" if stale else "Live peer response")
+                        + f"\nCaptured <t:{snapshot['captured_at']}:F>",
+            color=discord.Color.orange() if stale else discord.Color.green(),
+        )
+        for name, key in (("On Battery", "on_battery"), ("Battery (%)", "battery_percent"), ("Health", "health")):
+            embed.add_field(name=name, value=str(live.get(key, "Unknown"))[:1024])
+        embed.add_field(name="UPS support", value="Available" if snapshot["available"] else "Unavailable")
+        embed.set_footer(text=f"{len(rows)} samples | Last {window}h before capture | {snapshot['timezone']}")
+        graph = build_ups_status_graph(rows, hours=window, timezone_name=snapshot["timezone"])
+        if graph:
+            embed.set_image(url="attachment://ups_status.png")
+            await ctx.respond(embed=embed, file=discord.File(graph, filename="ups_status.png"), ephemeral=True)
+        else:
+            await ctx.respond(embed=embed, content="No graph data available." if not rows else None, ephemeral=True)
 
     def poll_for_event(self):
         """

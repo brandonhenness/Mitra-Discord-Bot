@@ -6,6 +6,8 @@ from typing import Iterable, Optional
 
 import discord
 
+from mitra_bot.services.peer_service import Notification
+
 
 class Notifier:
     """
@@ -22,6 +24,10 @@ class Notifier:
     async def send_to_channel(self, channel_id: Optional[int], message: str) -> bool:
         if not channel_id:
             return False
+
+        mesh = getattr(self.bot, "peer_service", None)
+        if mesh is not None:
+            return await mesh.notify(Notification(channel_id=int(channel_id), message=message))
 
         try:
             channel = self.bot.get_channel(int(channel_id))
@@ -40,6 +46,10 @@ class Notifier:
 
     async def dm_subscribers(self, subscriber_ids: Iterable[int], message: str) -> None:
         for user_id in list(subscriber_ids):
+            mesh = getattr(self.bot, "peer_service", None)
+            if mesh is not None:
+                await mesh.notify(Notification(user_id=int(user_id), message=message))
+                continue
             try:
                 user = await self.bot.fetch_user(int(user_id))
                 await user.send(message)

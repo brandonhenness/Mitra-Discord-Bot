@@ -5,6 +5,20 @@
 Mitra is a modular Discord bot package for home/server operations.  
 It monitors public IP changes, supports UPS status/graphing, and provides admin-only power controls.
 
+## Guided setup
+
+On Windows, extract the deployment ZIP and double-click **Setup-MitraBot.cmd**.
+With Python 3.10+ or uv installed, it installs dependencies and starts a wizard
+that opens Discord's setup pages, validates your bot token, generates the install
+link, configures notifications/admin access, and optionally provisions private peers.
+Existing installations can run `uv run mitra-setup`; headless machines can add
+`--no-browser`. Manual `.env` and `config.toml` setup remains supported.
+See [setup instructions](docs/setup.md).
+
+UPS history now uses SQLite with automatic, non-destructive JSONL migration.
+See [UPS history storage](docs/ups-history.md). Maintainers can publish tested,
+versioned release packages through [the release workflow](docs/releases.md).
+
 ## What Changed
 
 This project is no longer a single `bot.py` script.  
@@ -284,6 +298,14 @@ Common `[bot]` keys:
 
 ### Cloudflare DNS updates
 
+For multi-server, multi-domain or separate-account setups, run
+`uv run mitra-cloudflare-setup` on each server. It supports browser OAuth consent
+(with a registered Mitra client ID), manual tokens, domain/subdomain selection,
+and reviewed creation of missing A records. Each server updates only its own
+assignments. See [Cloudflare setup and examples](docs/cloudflare.md).
+
+The single-zone configuration below remains supported for existing installations.
+
 Mitra authenticates to Cloudflare with `CLOUDFLARE_API_TOKEN` as a Bearer API
 token. Create a scoped API token for the intended zone and grant DNS read and
 update access—for example, `Zone / DNS / Edit`, or DNS Read plus DNS Write when
@@ -348,6 +370,20 @@ failures are logged and retried without advancing the stored public-IP baseline.
 - UPS support depends on the `tripplite` package and hardware availability.
 - Build artifacts under `build/` and `dist/` are packaging outputs, not source entrypoints.
 - Dependencies are managed with `pyproject.toml` and pinned in `uv.lock`.
+
+## Private multi-server networks
+
+Optional peer networking adds `/servers list`, server targeting for `/power`
+and `/ups status`, and cached per-server UPS history. All instances share one
+Discord identity and connect independently; two servers work without a quorum.
+Peer uptime monitoring adds persistent incidents, replicated history, subscriber
+outage/recovery alerts, and `/servers status` / `/servers dashboard` graphs.
+See [private network setup and limitations](docs/private-peer-network.md) and
+[uptime monitoring setup](docs/peer-uptime-monitoring.md). Alerts are opt-in through
+`/servers alerts`; members subscribe with `/servers subscribe`.
+Use `/servers doctor` to diagnose setup and `/servers alerts-test` to verify delivery.
+Planned work can use `/servers maintenance`; `/servers dashboard-pin` publishes an
+automatically refreshed shared dashboard, stopped with `/servers dashboard-stop`.
 
 ## License
 

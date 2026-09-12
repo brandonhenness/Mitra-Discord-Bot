@@ -2,6 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
+from getpass import getpass
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,7 +24,8 @@ class UPSSettings:
     auto_shutdown_force: bool = False
 
     log_enabled: bool = True
-    log_file: str = "ups_stats.jsonl"
+    log_file: str = "ups_stats.db"
+    database_file: Optional[str] = None
     graph_default_hours: int = 6
 
     timezone: str = "UTC"
@@ -73,7 +75,7 @@ def load_settings(*, interactive_token: bool = True) -> AppSettings:
     cloudflare_api_token = (env.cloudflare_api_token or "").strip() or None
 
     if not token and interactive_token:
-        token = input("Please enter your Discord bot token: ").strip()
+        token = getpass("Please enter your Discord bot token (hidden): ").strip()
 
     if not token:
         raise RuntimeError("Discord token is missing (set DISCORD_APPLICATION_TOKEN).")
@@ -88,7 +90,8 @@ def load_settings(*, interactive_token: bool = True) -> AppSettings:
         auto_shutdown_delay_seconds=int(ups_cfg.get("auto_shutdown_delay_seconds", 0)),
         auto_shutdown_force=bool(ups_cfg.get("auto_shutdown_force", False)),
         log_enabled=bool(ups_cfg.get("log_enabled", True)),
-        log_file=str(ups_cfg.get("log_file", "ups_stats.jsonl")),
+        log_file=str(ups_cfg.get("log_file", "ups_stats.db")),
+        database_file=ups_cfg.get("database_file"),
         graph_default_hours=int(ups_cfg.get("graph_default_hours", 6)),
         timezone=str(ups_cfg.get("timezone", "UTC")),
     )

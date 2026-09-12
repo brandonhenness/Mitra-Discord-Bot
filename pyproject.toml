@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 dependencies = [
+    "rich>=13.9,<15",
     "py-cord>=2.4,<3",
     "aiohttp>=3.8,<4",
     "requests>=2.31,<3",
@@ -33,6 +34,13 @@ mitra-bot = "mitra_bot.main:main"
 mitra-init-config = "mitra_bot.init_config:main"
 mitra-init = "mitra_bot.init_config:main"
 mitra-migrate-cache = "mitra_bot.migrate_legacy_cache:main"
+mitra-peer-init = "mitra_bot.init_peers:main"
+mitra-setup = "mitra_bot.setup_wizard:main"
+mitra-cloudflare-setup = "mitra_bot.cloudflare_setup:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mitra_bot"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/mitra_bot", "/scripts", "/docs", "/tests", "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE", "/config.example.toml", "/peer-network.example.toml", "/.env.example", "/.env.production.example", "/Setup-MitraBot.cmd"]
+exclude = ["*.db", "*.db-*", "*.key", "*.jsonl", "*.log", "*.pyc", "**/__pycache__", "**/.env", "**/config.toml", "**/peer-network.toml"]

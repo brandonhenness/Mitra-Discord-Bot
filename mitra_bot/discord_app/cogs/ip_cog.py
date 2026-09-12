@@ -9,9 +9,11 @@ from discord.ext import commands
 
 from mitra_bot.services.ip_service import get_public_ip
 from mitra_bot.services.notifier import Notifier
+from mitra_bot.services.peer_service import Notification
 from mitra_bot.services.role_manager import ensure_role
 from mitra_bot.storage.storage_store import (
     get_notification_channel_id_for_guild,
+    get_notification_channel_map,
 )
 
 
@@ -93,6 +95,16 @@ class IPCog(commands.Cog):
         msg_body = _format_ip_message(new_ip, is_change=True)
 
         notifier = Notifier(self.bot)
+
+        # Every active instance reports its own IP events using local destinations.
+        mesh = getattr(self.bot, "peer_service", None)
+        if mesh is not None:
+            channels = set(get_notification_channel_map().values())
+            if not channels and self.bot.state.channel_id:
+                channels.add(self.bot.state.channel_id)
+            results = [await mesh.notify(Notification(channel_id=int(channel_id), message=msg_body,
+                                                       mention_ip_subscribers=True)) for channel_id in channels]
+            return all(results)
 
         configured = 0
         failed = 0
