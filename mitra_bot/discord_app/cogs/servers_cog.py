@@ -287,12 +287,14 @@ class ServersCog(commands.Cog):
             await ctx.respond(f"Could not configure alerts: {exc}", ephemeral=True)
 
     @alerts_group.command(name="subscribe", description="Subscribe to all Mitra operational alerts")
-    async def alerts_subscribe(self, ctx: discord.ApplicationContext):
-        await subscription(ctx, True)
+    async def alerts_subscribe(self, ctx: discord.ApplicationContext,
+                               user: discord.Option(discord.Member, "Member to subscribe (Mitra admins only)") = None):
+        await subscription(ctx, True, user)
 
     @alerts_group.command(name="unsubscribe", description="Unsubscribe from all Mitra operational alerts")
-    async def alerts_unsubscribe(self, ctx: discord.ApplicationContext):
-        await subscription(ctx, False)
+    async def alerts_unsubscribe(self, ctx: discord.ApplicationContext,
+                                 user: discord.Option(discord.Member, "Member to unsubscribe (Mitra admins only)") = None):
+        await subscription(ctx, False, user)
 
     @servers.command(name="subscribe", description="Subscribe to all Mitra operational alerts")
     async def subscribe(self, ctx: discord.ApplicationContext):

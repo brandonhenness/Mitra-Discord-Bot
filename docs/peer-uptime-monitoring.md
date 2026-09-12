@@ -15,6 +15,12 @@ changes, every node's outage/recovery alerts, and automatic update announcements
 2. Members run `/alerts subscribe` or `/alerts unsubscribe` for all alerts.
    `/ip subscribe`, `/ip unsubscribe`, `/servers subscribe`, and
    `/servers unsubscribe` are aliases; server selection is no longer needed.
+   Mitra administrators may supply `user:` on `/alerts subscribe` or
+   `/alerts unsubscribe` to manage another member, for example
+   `/alerts subscribe user:@Alex`. Supplying `user:` always requires the configured
+   Mitra admin role; omitting it keeps self-service available to everyone.
+   The selected member must belong to this guild. Confirmations are private and
+   do not ping the member; role audit reasons identify the administrator.
 3. Use `/servers alerts-test server:test mention:true` to check delivery.
    Server selection here identifies the simulated event, not a subscription group.
 

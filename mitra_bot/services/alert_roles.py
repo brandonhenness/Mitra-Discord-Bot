@@ -56,10 +56,23 @@ async def configure_shared_role(bot, guild):
     return role
 
 
-async def subscription(ctx, subscribe):
+async def subscription(ctx, subscribe, user=None):
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
         await ctx.respond("This command can only be used in a server.", ephemeral=True)
         return
+    if user is not None:
+        from mitra_bot.discord_app.checks import ensure_admin
+        guard = ensure_admin(ctx)
+        if guard:
+            await guard
+            return
+        if not isinstance(user, discord.Member) or user.guild.id != ctx.guild.id:
+            await ctx.respond("Choose a member of this Discord server.", ephemeral=True)
+            return
+    target = ctx.author if user is None else user
+    reason = "Subscribed to all Mitra alerts" if subscribe else "Unsubscribed from all Mitra alerts"
+    if user is not None:
+        reason += f" by administrator {ctx.author.id}"
     await ctx.defer(ephemeral=True)
     try:
         role = shared_role(ctx.guild)
@@ -68,12 +81,15 @@ async def subscription(ctx, subscribe):
         if not safe_role(ctx.bot, ctx.guild, role):
             raise ValueError("Mitra Alerts must have no permissions and be below the bot's role.")
         if subscribe:
-            await ctx.author.add_roles(role, reason="Subscribed to all Mitra alerts")
+            await target.add_roles(role, reason=reason)
         else:
             old = legacy_roles(ctx.bot, ctx.guild)
             if any(not safe_role(ctx.bot, ctx.guild, r) for r in old):
                 raise ValueError("An old subscriber role cannot safely be removed; ask an administrator to finish migration.")
-            await ctx.author.remove_roles(role, *old, reason="Unsubscribed from all Mitra alerts")
-        await ctx.respond("Subscribed to all Mitra alerts." if subscribe else "Unsubscribed from all Mitra alerts.", ephemeral=True)
+            await target.remove_roles(role, *old, reason=reason)
+        message = "Subscribed to all Mitra alerts." if subscribe else "Unsubscribed from all Mitra alerts."
+        if user is not None:
+            message = f"{target.mention}: {message}"
+        await ctx.respond(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
     except (ValueError, discord.HTTPException) as exc:
         await ctx.respond(f"Could not change subscription: {exc}", ephemeral=True)
