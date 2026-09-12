@@ -32,7 +32,7 @@ class PeerAlertDelivery:
             if message.author.id != self.bot.user.id:
                 continue
             for embed in message.embeds:
-                footer = embed.footer.text or ""
+                footer = getattr(embed.footer, "text", None) or ""
                 if not footer.startswith(prefix):
                     continue
                 try:

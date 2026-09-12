@@ -499,7 +499,7 @@ class PeerMonitor:
                 with self.store.db:
                     self.store.db.execute("UPDATE health_outbox SET attempts=attempts+1,due=?,error=? WHERE id=?",
                         (time.time()+min(3600, 15*2**min(attempts,8)), type(exc).__name__, key))
-                logging.warning("Peer alert delivery pending: %s", type(exc).__name__)
+                logging.warning("Peer alert delivery pending: %s", type(exc).__name__, exc_info=True)
 
     async def _alerts(self):
         while True:

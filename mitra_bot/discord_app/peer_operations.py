@@ -69,7 +69,7 @@ class SharedDashboard:
             raise ValueError("Dashboard guild mismatch")
         message = await channel.fetch_message(setting["message_id"])
         marker = dashboard_marker(self.mesh, setting["guild"])
-        if message.author.id != self.bot.user.id or not any((e.footer.text or "").startswith(marker) for e in message.embeds):
+        if message.author.id != self.bot.user.id or not any((getattr(e.footer, "text", None) or "").startswith(marker) for e in message.embeds):
             raise ValueError("Configured message is not this network's dashboard")
         rank = sorted([self.mesh.config.node_id, *self.mesh.peers]).index(self.mesh.config.node_id)
         threshold = setting["dashboard_interval"] + rank*15
@@ -98,10 +98,10 @@ async def find_dashboard(channel, bot, marker):
         messages = [message async for message in pins]
     for message in messages:
         message = getattr(message,"message",message)
-        if message.author.id == bot.user.id and any((e.footer.text or "").startswith(marker) for e in message.embeds):
+        if message.author.id == bot.user.id and any((getattr(e.footer, "text", None) or "").startswith(marker) for e in message.embeds):
             return message
     async for message in channel.history(limit=100):
-        if message.author.id == bot.user.id and any((e.footer.text or "").startswith(marker) for e in message.embeds):
+        if message.author.id == bot.user.id and any((getattr(e.footer, "text", None) or "").startswith(marker) for e in message.embeds):
             return message
     return None
 
