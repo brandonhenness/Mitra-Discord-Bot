@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands
 
 from mitra_bot.discord_app.checks import ensure_admin
+from mitra_bot.discord_app.command_errors import report_command_error
 from mitra_bot.services.update_service import (
     InstallResult,
     ReleaseInfo,
@@ -40,6 +41,10 @@ class UpdatePromptView(discord.ui.View):
         self.release = release
         self.source = source
 
+    async def on_error(self, error, item, interaction):
+        ctx = await interaction.client.get_application_context(interaction)
+        await report_command_error(ctx, error)
+
     def _is_admin_user(self, interaction: discord.Interaction) -> bool:
         guild = interaction.guild
         user = interaction.user
@@ -69,6 +74,7 @@ class UpdatePromptView(discord.ui.View):
             release=self.release,
             message=interaction.message,
             source=self.source,
+            interaction=interaction,
         )
         self.stop()
 
@@ -270,12 +276,24 @@ class UpdateCog(commands.Cog):
         release: ReleaseInfo,
         message: Optional[discord.Message],
         source: str,
+        interaction: Optional[discord.Interaction] = None,
     ) -> None:
         if message is None:
             return
         if self._install_lock.locked():
-            await message.reply("An update install is already in progress.")
+            if interaction is not None:
+                await interaction.followup.send("An update install is already in progress.", ephemeral=True)
+            else:
+                await message.reply("An update install is already in progress.")
             return
+
+        async def edit_feedback(embed):
+            if interaction is not None:
+                # Component messages may be ephemeral after a peer claims /update.
+                # Message.edit uses the channel endpoint, which cannot edit them.
+                await interaction.edit_original_response(embed=embed, view=None)
+            else:
+                await message.edit(embed=embed, view=None)
 
         async with self._install_lock:
             installing_embed = self.build_embed(
@@ -285,7 +303,7 @@ class UpdateCog(commands.Cog):
                 color=discord.Color.gold(),
                 description=f"Starting install (triggered from `{source}`).",
             )
-            await message.edit(embed=installing_embed, view=None)
+            await edit_feedback(installing_embed)
 
             result: InstallResult = await asyncio.to_thread(install_release, release)
             if not result.ok:
@@ -296,7 +314,7 @@ class UpdateCog(commands.Cog):
                     color=discord.Color.red(),
                     description=f"Install failed: {_trim(result.error or 'unknown error', 500)}",
                 )
-                await message.edit(embed=failed_embed, view=None)
+                await edit_feedback(failed_embed)
                 return
 
             success_embed = self.build_embed(
@@ -309,7 +327,7 @@ class UpdateCog(commands.Cog):
                     "Restarting now."
                 ),
             )
-            await message.edit(embed=success_embed, view=None)
+            await edit_feedback(success_embed)
             await self._restart_after_update(origin_message=message)
 
     async def _send_latest_changelog(
