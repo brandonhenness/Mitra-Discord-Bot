@@ -46,6 +46,8 @@ jobs:
             uv run --no-sync python -m mitra_bot.release_tools check "$RELEASE_VERSION"
           fi
           uv lock --check
+      - name: Create test temporary directory parent
+        run: uv run --no-sync python -c "from pathlib import Path; Path('.recovery').mkdir(parents=True, exist_ok=True)"
       - name: Test without Discord credentials or hardware actions
         run: uv run --no-sync python -m pytest -q -m "not integration" --basetemp=.recovery/ci-release --tb=short
 

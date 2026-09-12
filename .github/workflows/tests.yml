@@ -23,6 +23,8 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run --no-sync python -m mitra_bot.release_tools check
+      - name: Create test temporary directory parent
+        run: uv run --no-sync python -c "from pathlib import Path; Path('.recovery').mkdir(parents=True, exist_ok=True)"
       - run: uv run --no-sync python -m pytest -q -m "not integration" --basetemp=.recovery/ci-tests --tb=short
       - name: Build release artifacts without publishing
         run: |
