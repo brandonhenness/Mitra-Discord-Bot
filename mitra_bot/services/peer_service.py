@@ -57,7 +57,7 @@ class Envelope(BaseModel):
     request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     issued_at: int
     application_key: str = ""
-    operation: Literal["snapshot", "power", "health", "notify", "history", "monitor_settings"]
+    operation: Literal["snapshot", "power", "health", "notify", "history", "monitor_settings", "update_status", "update_install"]
     payload: dict[str, Any]
 
 
@@ -258,6 +258,13 @@ class PeerService:
             if msg.payload:
                 raise PeerError("Unexpected health parameters")
             return self.local_health()
+        if msg.operation in {"update_status", "update_install"}:
+            if msg.operation == "update_install" and peer.node_id != self.config.resolved_state_owner:
+                raise PeerError("Only the configured state owner may initiate remote updates")
+            handler = getattr(self, "update_rpc", None)
+            if handler is None:
+                raise PeerError("Rolling updates are not available on this node")
+            return await handler(msg.operation, msg.payload)
         if msg.operation == "history":
             if set(msg.payload) != {"after"} or type(msg.payload["after"]) is not int or msg.payload["after"] < 0:
                 raise PeerError("Invalid history cursor")

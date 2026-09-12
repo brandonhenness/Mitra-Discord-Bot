@@ -93,3 +93,61 @@ targets the running Python environment explicitly. Project package metadata and
 new console entry points are refreshed by a normal `uv sync --frozen --no-dev`
 while the bot is stopped. These fixes cannot change an older updater already
 loaded in a running process.
+
+
+## Rolling peer updates
+
+Starting with beta 9, `/update check` and `/update install` default to **all nodes**
+when peer mode is enabled. Both show a confirmation before installing. Use
+`/update install server:test` (or `/update check server:test`) for a single node.
+Standalone installations retain local updates. Automatic update prompts also
+update all nodes when accepted in peer mode.
+
+The configured application-state owner coordinates the plan. Other nodes cannot
+initiate an installation through peer RPC. Discord still requires the Mitra admin
+role both to prepare and to confirm an update. If the owner is unavailable, the
+update command does not fail over to an unrelated coordinator.
+
+The coordinator checks that every selected node supports the protocol and is
+reachable with Discord connected before starting. Remote nodes update in sorted
+node-ID order; the coordinator updates last. Already-current or newer nodes are
+skipped. Each node resolves the exact confirmed release from its own configured
+GitHub repository and requires a checksummed artifact, using the existing backup,
+installation and rollback checks. A confirmed beta can be installed even if that
+node's automatic release-discovery preference excludes betas. No download URL or
+shell command is accepted from a peer.
+
+After each installation the coordinator waits for a changed process boot ID,
+the exact expected running version, and two Discord-connected responses five
+seconds apart. It stops on reported failure, or after 30 minutes without confirmed
+recovery. Previously updated nodes are not downgraded if a later node fails.
+
+`/update status` shows the latest persistent rollout and each node's progress.
+`/update cancel` prevents further nodes from starting; an already-started install
+continues. Plans and target jobs live in the local peer database. A restarted
+coordinator resumes its recorded plan, including verification of its own final
+restart. A lost acknowledgement reuses the same target job ID. Interrupted
+installations are not automatically repeated: inspect the recovery files on that
+node. After resolving a failure, confirm a new plan; current nodes will be skipped.
+
+These are coordinated software updates, not a guarantee of zero downtime. They
+may generate normal outage/recovery alerts, and nonreplicated application commands
+are unavailable while the owner restarts. Do not run separate manual installers
+against these folders during a rollout. Keep peer databases and credentials in
+backups and keep node clocks synchronized.
+
+### One-time bootstrap
+
+Older betas do not implement the new RPCs. Install beta 9 or newer on **every node
+once** before attempting a rolling update. An older primary can use its existing
+local `/update check` installer; other older nodes need their existing local/manual
+update procedure. For this development checkout, restart after the new code is
+installed. Preflight refuses incompatible peers instead of partially updating the
+rest of the network.
+
+Run a live beta test with two machines before relying on this for production:
+confirm the remote node installs and reconnects before the coordinator restarts;
+then verify `/update status` reports completion on the expected release. Also test
+an unavailable peer, a rejected release, and cancellation. Automated tests use
+mocked installers/restarts and real TLS for RPC authorization; they do not replace
+that cross-machine deployment test.

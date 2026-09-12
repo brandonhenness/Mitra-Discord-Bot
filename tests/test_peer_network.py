@@ -360,3 +360,19 @@ def test_different_discord_identity_cannot_issue_peer_commands(bundles, tmp_path
                 await nodes["a"].request("b", "health", {})
     asyncio.run(run())
 
+
+
+def test_only_state_owner_can_initiate_updates_over_real_tls(bundles, tmp_path):
+    async def run():
+        async with mesh(bundles, tmp_path) as nodes:
+            target = nodes["b"]
+            target.config.state_owner = "a"
+            target.update_rpc = AsyncMock(return_value={"accepted": True})
+            assert await nodes["a"].request("b", "update_install", {"job": "a"*32, "version": "1.0.0"}) == {"accepted": True}
+            target.update_rpc.reset_mock()
+            with pytest.raises(PeerError, match="rejected"):
+                await nodes["c"].request("b", "update_install", {"job": "c"*32, "version": "1.0.0"})
+            target.update_rpc.assert_not_awaited()
+            await nodes["c"].request("b", "update_status", {})
+            target.update_rpc.assert_awaited_once_with("update_status", {})
+    asyncio.run(run())

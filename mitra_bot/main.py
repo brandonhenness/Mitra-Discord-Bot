@@ -326,6 +326,10 @@ async def main_async() -> None:
     try:
         if peer_service:
             await peer_service.start()
+            from mitra_bot.services.fleet_updates import FleetUpdates
+            bot.fleet_updates = FleetUpdates(bot, peer_service)
+            await bot.fleet_updates.start()
+            peer_service.update_rpc = bot.fleet_updates.rpc
             # Hardware monitoring starts even before this node's Discord login.
             await ip_task.start()
             await ups_task.start()
@@ -343,6 +347,8 @@ async def main_async() -> None:
         for monitor in (ip_task, ups_task, update_task):
             monitor.loop.cancel()
         if peer_service:
+            if getattr(bot, "fleet_updates", None):
+                await bot.fleet_updates.close()
             await peer_service.close()
         await bot.close()
 

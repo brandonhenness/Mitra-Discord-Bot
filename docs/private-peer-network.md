@@ -125,8 +125,8 @@ Existing To-Do, notification-setting, updater, IP command and UPS-setting comman
 remain assigned to `state_owner`. To-Do listeners and periodic update notifications
 also run there. Their databases are not replicated. Other nodes report that the
 owner did not accept a stateful command instead of modifying a different database.
-Monitoring/power commands continue without that owner. `/update` updates that
-owner; update other installations with the existing local update procedure.
+Monitoring/power commands continue without that owner. `/update` is coordinated by that owner and can update one node or all nodes
+sequentially. See [rolling updates and bootstrap](releases.md#rolling-peer-updates).
 
 ## Membership and validation
 
