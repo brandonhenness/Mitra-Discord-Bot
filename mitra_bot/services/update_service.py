@@ -285,13 +285,17 @@ def _install_requirements() -> None:
     if pyproject.exists():
         uv = shutil.which("uv")
         if uv:
-            cmd = [uv, "sync", "--no-dev", "--frozen", "--no-install-project"]
+            # Excluding the project from an exact sync also uninstalls its
+            # existing launcher, which Windows may have locked. Keep the
+            # project installed while updating its locked dependencies.
+            cmd = [uv, "sync", "--no-dev", "--frozen", "--no-install-project", "--inexact"]
             subprocess.run(
                 cmd,
                 cwd=PROJECT_ROOT,
                 check=True,
                 text=True,
                 capture_output=True,
+                env={**os.environ, "UV_PROJECT_ENVIRONMENT": sys.prefix},
             )
             return
 

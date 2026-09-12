@@ -266,7 +266,7 @@ def guided_setup(*,env_file=".env",open_browser=True):
     from mitra_bot.setup_health import show_health
     show_health(env_file=env_file)
     ui.summary([("Discord", application.get("name", "Connected")), ("UPS monitoring", "Enabled" if cfg["ups"]["enabled"] else "Disabled"), ("Cloudflare", cloudflare_result)])
-    ui.message("Setup saved. Start with: uv run --env-file " + str(env_file) + " mitra-bot")
+    ui.message("Setup saved. Start with: uv run --env-file " + str(env_file) + " python -m mitra_bot.main")
     ui.message("Without uv: .venv\\Scripts\\python.exe -m mitra_bot.main (uses .env by default).")
     ui.message("In Discord: /servers doctor (when peers are enabled), then /servers alerts to choose outage subscriptions.")
     ui.message("Windows automatic startup is available with scripts/Install-MitraBotStartup.ps1. Manual configuration remains supported.")

@@ -101,7 +101,7 @@ Remove-Item Env:RUN_CLOUDFLARE_INTEGRATION -ErrorAction SilentlyContinue
 Run the bot:
 
 ```bash
-uv run --env-file .env mitra-bot
+uv run --env-file .env python -m mitra_bot.main
 ```
 
 Alternative entrypoint:
@@ -127,7 +127,7 @@ uv run mitra-init
 Start the bot:
 
 ```bash
-uv run --env-file .env.production mitra-bot
+uv run --env-file .env.production python -m mitra_bot.main
 ```
 
 For Windows service/task setups, use the same command after setting required environment variables and ensuring `config.toml` exists.
@@ -213,7 +213,7 @@ launch that explicitly uses `.env`:
 
 ```powershell
 Set-Location "C:\Users\Mitra\Documents\GitHub\Mitra-Discord-Bot"
-uv run --env-file .env mitra-bot
+uv run --env-file .env python -m mitra_bot.main
 ```
 
 On startup, Mitra reconciles every configured Cloudflare record even when the
@@ -269,11 +269,11 @@ the whole process, including path overrides, Discord intent configuration, and
 Cloudflare verification code:
 
 ```bash
-uv run --env-file .env mitra-bot
+uv run --env-file .env python -m mitra_bot.main
 ```
 
 ```bash
-uv run --env-file .env.production mitra-bot
+uv run --env-file .env.production python -m mitra_bot.main
 ```
 
 Best practice:

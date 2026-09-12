@@ -71,3 +71,25 @@ backup. Do not run two updater processes against one installation.
 The import check does not start the bot or prove Discord reconnection. Live
 startup/failover acceptance is still required. The separate PowerShell deployment
 script retains its existing backup-first, manual-recovery procedure.
+
+## Windows launcher lock during an upgrade
+
+If an older bot reports Windows error 32 while removing
+`.venv/Scripts/mitra-bot.exe`, stop that bot process before repairing its environment.
+Older updater versions copied new files before installing dependencies, so the
+installation may already contain new source files even though Discord reports a
+failed update. Do not repeatedly retry the install from the still-running process.
+
+In the installation directory, run `uv sync --frozen --no-dev`, then start with
+`uv run --no-sync --env-file .env python -m mitra_bot.main`. Substitute
+`.env.production` if that is the file normally used on the server. If dependency
+repair fails, keep the bot stopped and preserve the installation for diagnosis.
+This repairs the copied version; it does not download a different release.
+
+The Windows startup script now uses the Python module rather than keeping the
+generated console launcher open. In-process uv dependency sync uses `--inexact`
+with `--no-install-project` to retain the installed project and its launcher, and
+targets the running Python environment explicitly. Project package metadata and
+new console entry points are refreshed by a normal `uv sync --frozen --no-dev`
+while the bot is stopped. These fixes cannot change an older updater already
+loaded in a running process.

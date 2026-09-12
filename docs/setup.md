@@ -57,7 +57,7 @@ Keep the provisioning directory and offline CA key private. Allow TCP 9843 betwe
 peers; the wizard does not change firewall rules. See [peer setup](private-peer-network.md)
 for advanced network configuration and adding nodes later.
 
-Start with `uv run --env-file .env mitra-bot`. Without uv on Windows, use
+Start with `uv run --env-file .env python -m mitra_bot.main`. Without uv on Windows, use
 `.venv\Scripts\python.exe -m mitra_bot.main`. Automatic Windows startup remains
 available through `scripts/Install-MitraBotStartup.ps1`.
 

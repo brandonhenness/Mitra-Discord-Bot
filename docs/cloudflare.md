@@ -109,7 +109,7 @@ Choose Manual API token in the wizard. It opens Cloudflare's token page; create 
 token with **Zone Read + DNS Edit** restricted to the required zones and paste it
 into the hidden prompt. The wizard discovers zones/record IDs and writes a named
 environment variable such as `CLOUDFLARE_HOME_API_TOKEN` into `.env`. `--env-file`
-selects another file; start with `uv run --env-file THAT_FILE mitra-bot` so named
+selects another file; start with `uv run --env-file THAT_FILE python -m mitra_bot.main` so named
 tokens reach the process. Direct Python launches also read `.env`; `MITRA_ENV_FILE`
 can select the fallback file for named Cloudflare credentials.
 
