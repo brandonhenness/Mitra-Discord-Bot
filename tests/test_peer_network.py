@@ -396,3 +396,28 @@ def test_node_commands_and_settings_owner_permission_over_real_tls(bundles, tmp_
             with pytest.raises(PeerError, match="rejected"):
                 await nodes["a"].request("b", "public_ip", {})
     asyncio.run(run())
+
+
+def test_membership_add_remove_and_apply_preserve_existing_identity(bundles, tmp_path):
+    from mitra_bot.peer_membership import prepare, apply_membership
+    import shutil
+    added = tmp_path / "added"
+    assert prepare(bundles, added, add="d=127.0.0.1") == ["a", "b", "c", "d"]
+    assert not (added/"OFFLINE-CA.key").exists()
+    for node in "abc":
+        assert (added/node/"node.key").read_bytes() == (bundles/node/"node.key").read_bytes()
+        cfg = PeerConfig.model_validate(tomllib.loads((added/node/"peer-network.toml").read_text()))
+        assert any(p.node_id == "d" and not p.allow_power for p in cfg.peers)
+    local = tmp_path/"live"
+    shutil.copytree(bundles/"b", local)
+    before = (local/"peer-network.toml").read_text()
+    backup = apply_membership(added/"b"/"peer-network.toml", local/"peer-network.toml")
+    assert backup.read_text() == before
+    assert 'node_id = "d"' in (local/"peer-network.toml").read_text()
+    with pytest.raises(ValueError, match="another"):
+        apply_membership(added/"a"/"peer-network.toml", local/"peer-network.toml")
+    removed = tmp_path/"removed"
+    assert prepare(added, removed, remove="d") == ["a", "b", "c"]
+    assert not (removed/"d").exists()
+    with pytest.raises(ValueError, match="state owner"):
+        prepare(added, tmp_path/"bad", remove="a")

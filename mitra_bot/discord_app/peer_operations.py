@@ -111,6 +111,13 @@ async def doctor(mesh, bot, guild):
     lines = [f"Instance: `{mesh.config.node_id}` · state owner: `{mesh.config.resolved_state_owner}`",
              f"Discord: {'connected' if bot.is_ready() and bot.gateway_connected else 'disconnected'}"]
     tasks = mesh.monitor.tasks
+    owner = mesh.config.resolved_state_owner
+    owner_connected = bool(bot.is_ready() and bot.gateway_connected) if owner == mesh.config.node_id else bool(mesh.online.get(owner))
+    lines.append(f"State owner: {'available (latest local view)' if owner_connected else 'unavailable or not yet observed'}. "
+                 "Rolling updates, UPS configuration, channel settings and ToDo writes require this owner. "
+                 "Monitoring, shared alerts, IP/about reads and targeted power/UPS status can use surviving nodes.")
+    lines.append("Application state is not automatically replicated or promoted. Restore the same owner identity from backup; "
+                 "never run two copies of that identity. See docs/operations-recovery.md.")
     lines.append(f"Monitoring tasks running: {sum(not task.done() for task in tasks)}/{len(tasks)}")
     for label, filename in (("Node certificate", mesh.config.cert_file), ("CA certificate", mesh.config.ca_file)):
         try:

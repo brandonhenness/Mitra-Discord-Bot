@@ -150,6 +150,10 @@ monitoring/power access with the other node off. These live checks are not yet r
 
 ## Node-aware commands and dashboard controls
 
+For persistent update progress, planned-update maintenance, membership changes,
+backup/restore, owner recovery and the live beta test checklist, see
+[Operations and recovery](operations-recovery.md).
+
 - `/ip status` shows every node's current public IP. Use `server:test` to query
   one node, or `server:all` for the network. Unavailable results are labeled;
   another node's IP is never substituted.
