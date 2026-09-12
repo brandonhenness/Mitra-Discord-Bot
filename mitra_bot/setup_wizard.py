@@ -139,7 +139,7 @@ def read_bot_token(browse):
     ui.message("Paste into this console, then press Enter. Hidden input shows no characters or asterisks.")
     ui.message("After Enter, I will confirm whether input was received. Ctrl+C cancels setup.")
     while True:
-        token = getpass.getpass("Discord bot token (hidden; press Enter after pasting): ").strip()
+        token = ui.secret("Discord bot token (hidden; press Enter after pasting): ").strip()
         if token:
             ui.message(f"Received {len(token)} characters. Checking the bot token with Discord...")
             return token
@@ -164,14 +164,41 @@ def authenticate_discord(existing, browse):
             token = read_bot_token(browse)
 
 
+def discord_installation(api, application, browse):
+    guilds = api.request("GET", "/users/@me/guilds")
+    if guilds:
+        ui.message(f"This bot is already installed in {len(guilds)} Discord server(s). You can keep its current installation.")
+    else:
+        ui.message("This bot is not installed in a Discord server yet. Install it before selecting a notification channel.")
+    if yes("Review Server Members Intent in Discord's Bot settings?", not bool(guilds)):
+        ui.message("Enable Server Members Intent so Mitra can manage alert subscriptions. Save changes on the Bot page.")
+        ui.message("Message Content Intent and Presence Intent are not required.")
+        browse(f"{PORTAL}/{application['id']}/bot")
+        ui.ask("Press Enter after saving Server Members Intent. ")
+    else:
+        ui.message("Keeping current intents. If subscriptions fail, check Server Members Intent in the Developer Portal.")
+    if yes("Install in another Discord server or repair installation permissions?", not bool(guilds)):
+        ui.message("The install page requests View Channels, Send Messages, Embed Links, Attach Files,")
+        ui.message("Read Message History, Manage Roles and Pin Messages. Administrator is not required.")
+        ui.message("Select Add to Server and Authorize. If unavailable, enable Guild Install in Developer Portal > Installation.")
+        browse(install_url(application["id"]))
+        ui.ask("Press Enter after authorizing the installation. ")
+        guilds = api.request("GET", "/users/@me/guilds")
+    else:
+        ui.message("Keeping the current Discord installation; no authorization page opened.")
+    return guilds
+
+
 def guided_setup(*,env_file=".env",open_browser=True):
+    opened = set()
     def browse(url):
         ui.message(url)
-        if open_browser:
+        if open_browser and url not in opened:
             webbrowser.open(url)
+            opened.add(url)
     ui.banner("MITRA  /  SETUP", "Your servers. One bot. Let's get connected.")
     ui.message("Existing settings are retained unless you change them.")
-    ui.step("Discord connection", 1, 5)
+    ui.step("Discord connection", 1, 5, purpose="Connect this machine to your bot identity. Existing bots can keep their token, intents and installation.")
     ui.message("Discord app creation happens in the Developer Portal. This wizard never asks for your Discord password.")
     ui.message("For another peer in an existing private network, reuse that network's bot token.")
     from mitra_bot.settings import EnvSettings
@@ -179,20 +206,9 @@ def guided_setup(*,env_file=".env",open_browser=True):
     token, api, application = authenticate_discord(existing, browse)
     save_token(env_file,token)
     ui.message(f"Validated application: {application.get('name','Mitra')} ({application['id']}). Token saved locally.")
-    browse(f"{PORTAL}/{application['id']}/bot")
-    ui.message("On the Bot page, scroll to Privileged Gateway Intents, enable Server Members Intent, and save changes.")
-    ui.message("Mitra does not require Message Content Intent or Presence Intent.")
-    ui.ask("Press Enter after saving Server Members Intent. ")
-    ui.message("Next, the Discord install page will request these permissions automatically:")
-    ui.message("  View Channels, Send Messages, Embed Links, Attach Files, Read Message History,")
-    ui.message("  Manage Roles (subscriptions/admin access), and Pin Messages (dashboards).")
-    ui.message("Select Add to Server / your Discord server and click Authorize. Administrator is not required.")
-    ui.message("If Guild Install is unavailable, enable it in Developer Portal > Installation > Installation Contexts.")
-    browse(install_url(application["id"]))
-    ui.ask("Install the bot in your Discord server (or keep its existing installation), then press Enter. ")
-    ui.step("Server & notifications", 2, 5)
+    guilds = discord_installation(api, application, browse)
+    ui.step("Server & notifications", 2, 5, purpose="Choose the Discord community and channel for alerts, then configure who can use administrative commands.")
     cfg = read_config_dict()
-    guilds = api.request("GET","/users/@me/guilds")
     guild = choose("Discord server",guilds,lambda item:item["name"]) if guilds else None
     if guild:
         guild_id = str(guild["id"])
@@ -215,16 +231,16 @@ def guided_setup(*,env_file=".env",open_browser=True):
             api.request("PUT",f"/guilds/{guild_id}/members/{detail['owner_id']}/roles/{role['id']}")
     else:
         ui.message("No server selected. Assign the configured Mitra admin role manually before using admin commands.")
-    ui.step("UPS monitoring", 3, 5)
+    ui.step("UPS monitoring", 3, 5, purpose="Collect battery and power history from a supported UPS connected to this machine by USB. Skip if this machine has no UPS.")
     cfg["ups"]["enabled"] = yes("Monitor a supported USB UPS on this machine?",cfg["ups"]["enabled"])
     write_config_dict(cfg)
     from mitra_bot.services.ups.ups_database import UPSLogStore
     if cfg["ups"]["enabled"]:
         store = UPSLogStore(log_file=cfg["ups"].get("log_file","ups_stats.db"),database_file=cfg["ups"].get("database_file"))
         ui.message(f"UPS database ready: {store.log_path}")
-    ui.step("Private network", 4, 5)
+    ui.step("Private network", 4, 5, purpose="Connect machines to the same private bot network. Create bundles once, then install each machine's own bundle.")
     if not Path("peer-network.toml").exists():
-        ui.message("Private network: 1. Single server  2. Create a network  3. Install an existing peer bundle")
+        ui.choices(["Single server — run independently", "Create a network — provision bundles for every machine", "Install an existing peer bundle — join your network"])
         mode = ui.ask("Choose [1]: ").strip() or "1"
         if mode == "2":
             from mitra_bot.init_peers import provision
@@ -256,7 +272,9 @@ def guided_setup(*,env_file=".env",open_browser=True):
             ui.message(f"Installed peer {peer.node_id}; reuse the same Discord bot token on all peers.")
         elif mode != "1":
             raise ValueError("Unknown private network setup choice.")
-    ui.step("Cloudflare DNS", 5, 5)
+    else:
+        ui.message("Existing peer-network.toml found. Keeping this machine's network identity and peer settings.")
+    ui.step("Cloudflare DNS", 5, 5, purpose="Keep selected domain names pointed at this machine when its public IP changes. Optional; each machine can use its own account.")
     cloudflare_result = "Existing settings retained"
     if yes("Set up Cloudflare DNS updates for this server?", False):
         from mitra_bot.cloudflare_setup import run_cloudflare_setup

@@ -13,6 +13,12 @@ that opens Discord's setup pages, validates your bot token, generates the instal
 link, configures notifications/admin access, and optionally provisions private peers.
 Existing installations can run `uv run mitra-setup`; headless machines can add
 `--no-browser`. Manual `.env` and `config.toml` setup remains supported.
+
+Setup sections explain their purpose; interactive questions appear in yellow
+"Your choice" boxes, separate from instructions and progress. Existing Discord
+installations default to keeping their intents and authorization. The wizard
+opens those pages only when you choose to review or repair them. Use `--plain`
+for simple terminal output, or `--no-browser` to keep all browser steps manual.
 See [setup instructions](docs/setup.md).
 
 UPS history now uses SQLite with automatic, non-destructive JSONL migration.
