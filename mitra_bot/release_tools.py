@@ -15,7 +15,7 @@ from mitra_bot.storage.config_store import tomllib
 
 VERSION_FILES = ("pyproject.toml","mitra_bot/__init__.py","uv.lock")
 ROOT_FILES = {"pyproject.toml","uv.lock","README.md","LICENSE","config.example.toml","peer-network.example.toml",
-              ".env.example",".env.production.example","Setup-MitraBot.cmd"}
+              ".env.example",".env.production.example","Setup-MitraBot.cmd","TERMS_OF_SERVICE.md","PRIVACY_POLICY.md"}
 DIRECTORIES = {"mitra_bot","scripts","docs","tests"}
 
 

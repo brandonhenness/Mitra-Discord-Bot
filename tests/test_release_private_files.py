@@ -16,6 +16,8 @@ def test_private_deployment_files_are_ignored_and_excluded_from_bundle(filename)
 
 
 def test_documented_configuration_examples_remain_in_release():
+    assert allowed_file("TERMS_OF_SERVICE.md")
+    assert allowed_file("PRIVACY_POLICY.md")
     assert allowed_file(".env.example")
     assert allowed_file("config.example.toml")
     assert allowed_file("peer-network.example.toml")
