@@ -63,6 +63,8 @@ async def main_async() -> None:
             power=peer_power,
         )
         bot.peer_service = peer_service
+        from mitra_bot.discord_app.node_commands import local_operation
+        peer_service.node_rpc = lambda operation, payload: local_operation(bot, operation, payload)
         peer_service.configure_discord_identity(settings.token)
         peer_service.health_provider = lambda: {"discord_connected": bot.gateway_connected}
         bot.auto_sync_commands = peer_service.is_state_owner

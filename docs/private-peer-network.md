@@ -148,6 +148,36 @@ run a controlled two-machine Discord acceptance test: event delivery to both
 sessions, one response per interaction, confirmation after origin failure, and
 monitoring/power access with the other node off. These live checks are not yet run.
 
+## Node-aware commands and dashboard controls
+
+- `/ip status` shows every node's current public IP. Use `server:test` to query
+  one node, or `server:all` for the network. Unavailable results are labeled;
+  another node's IP is never substituted.
+- `/about` shows each node's version, runtime, process uptime and Discord
+  connection. Its optional `server` argument also accepts a node ID or `all`.
+  "Discord servers" counts guilds, not peer machines.
+- `/ups monitoring enabled:false server:test` changes only that node's UPS
+  monitoring. `/ups timezone tz:America/Los_Angeles server:test` changes only
+  that node's graph timezone. Both require the Mitra admin role. Omitting
+  `server` retains the configured state owner as the target; bulk changes are
+  not accepted. The state owner authorizes and forwards remote settings over
+  authenticated TLS and must be available to handle these commands.
+- Standalone installations support `local`; IP and about also accept `all`.
+
+Every target needs software supporting these commands. An older peer may still
+be reachable for health checks while rejecting a new operation. Update the peer
+before retrying. If a setting response is lost, inspect the selected node before
+retrying; the change may already have been saved there.
+
+The dashboard's **Show** selector chooses the machine or all machines being
+graphed. **Monitoring perspective** reveals the optional **Measured from**
+selector, which chooses whose observations to display. For example, Show: test
+and Measured from: mitra describes the primary's ability to reach test. The
+observer remains displayed in the dashboard even when the selector is hidden.
+Time-range and refresh controls retain that perspective. Missing measurements
+remain unknown coverage, rather than being counted as an outage. Controls open
+a private refreshed dashboard without changing the shared pinned dashboard.
+
 ## Repairing an early-beta CA certificate
 
 Some OpenSSL installations added their default CA extensions alongside Mitra's

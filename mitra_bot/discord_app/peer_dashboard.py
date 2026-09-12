@@ -16,10 +16,10 @@ def tag(node):
     return hashlib.sha256(node.encode()).hexdigest()[:12]
 
 
-def dashboard_view(mesh, subject, observer, hours, page):
+def dashboard_view(mesh, subject, observer, hours, page, advanced=False):
     view = discord.ui.View(timeout=None)
     def custom(window, number):
-        return f"mitra-health:{tag(subject) if subject else 'all'}:{tag(observer)}:{window}:{number}"
+        return f"mitra-health:{tag(subject) if subject else 'all'}:{tag(observer)}:{window}:{number}" + (":advanced" if advanced else "")
     for window in (1, 6, 24, 168):
         view.add_item(discord.ui.Button(label=f"{window}h" if window < 168 else "7 days",
                                       style=discord.ButtonStyle.primary if window == hours else discord.ButtonStyle.secondary,
@@ -31,19 +31,25 @@ def dashboard_view(mesh, subject, observer, hours, page):
                                       disabled=page == 0, row=1))
         view.add_item(discord.ui.Button(label="Next", custom_id=custom(hours, min(pages-1,page+1))+":next",
                                       disabled=page >= pages-1, row=1))
+    view.add_item(discord.ui.Button(label="Hide monitoring perspective" if advanced else "Monitoring perspective",
+                                   custom_id=custom(hours, page)+":perspective", row=1))
     # Selectors paginate naturally with dashboard pages; slash options accept every node.
     nodes = sorted([mesh.config.node_id, *mesh.peers])[page*8:page*8+8]
     for kind, selected in (("server", subject), ("observer", observer)):
-        options = [discord.SelectOption(label=node, value=tag(node), default=node == selected) for node in nodes]
+        if kind == "observer" and not advanced:
+            continue
+        label = "Show" if kind == "server" else "Measured from"
+        choices = nodes + ([selected] if selected and selected not in nodes else [])
+        options = [discord.SelectOption(label=f"{label}: {node}", value=tag(node), default=node == selected) for node in choices]
         if kind == "server":
-            options.insert(0, discord.SelectOption(label="All servers", value="all", default=subject is None))
-        view.add_item(discord.ui.Select(placeholder=f"Select {kind} (page {page+1})", options=options,
+            options.insert(0, discord.SelectOption(label="Show: All servers", value="all", default=subject is None))
+        view.add_item(discord.ui.Select(placeholder=f"{label} (page {page+1})", options=options,
                                       custom_id=custom(hours,page)+f":{kind}", row=2 if kind == "server" else 3))
     view.stop()
     return view
 
 
-async def build_dashboard(mesh, subject=None, observer=None, hours=24, page=0):
+async def build_dashboard(mesh, subject=None, observer=None, hours=24, page=0, advanced=False):
     observer = mesh.resolve(observer or mesh.config.node_id)
     if subject:
         mesh.resolve(subject)
@@ -95,7 +101,7 @@ async def build_dashboard(mesh, subject=None, observer=None, hours=24, page=0):
     embed.set_image(url="attachment://peer-health.png")
     embed.set_footer(text=f"UTC · 5-minute stored buckets (long graphs aggregate) · page {page+1}")
     return dict(embed=embed, file=discord.File(graph, filename="peer-health.png"),
-                view=dashboard_view(mesh, subject, observer, hours, page))
+                view=dashboard_view(mesh, subject, observer, hours, page, advanced))
 
 
 async def handle_dashboard_component(bot, interaction):
@@ -111,6 +117,10 @@ async def handle_dashboard_component(bot, interaction):
             raise ValueError("Invalid message")
         parts = interaction.data["custom_id"].split(":")
         _, subject_tag, observer_tag, window, page_text, *action = parts
+        advanced = "advanced" in action
+        action = [part for part in action if part != "advanced"]
+        if action == ["perspective"]:
+            advanced = not advanced
         if action and action[0] in ("server", "observer"):
             selected = interaction.data["values"][0]
             if action[0] == "server":
@@ -124,7 +134,7 @@ async def handle_dashboard_component(bot, interaction):
         if not 0 <= page <= len(mesh.peers)//8:
             raise ValueError("Invalid page")
         # A fresh ephemeral response works even after the original interaction token expires.
-        payload = await build_dashboard(mesh, subject, observer, hours, page)
+        payload = await build_dashboard(mesh, subject, observer, hours, page, advanced=advanced)
         await interaction.followup.send(**payload, ephemeral=True)
     except (ValueError, KeyError, IndexError):
         await interaction.followup.send("This dashboard control is invalid or membership changed. Run /servers dashboard again.", ephemeral=True)

@@ -376,3 +376,23 @@ def test_only_state_owner_can_initiate_updates_over_real_tls(bundles, tmp_path):
             await nodes["c"].request("b", "update_status", {})
             target.update_rpc.assert_awaited_once_with("update_status", {})
     asyncio.run(run())
+
+
+def test_node_commands_and_settings_owner_permission_over_real_tls(bundles, tmp_path):
+    async def run():
+        async with mesh(bundles, tmp_path) as nodes:
+            target = nodes["b"]
+            target.config.state_owner = "a"
+            target.node_rpc = AsyncMock(return_value={"message": "saved"})
+            await nodes["a"].request("b", "ups_settings", {"enabled": False})
+            target.node_rpc.assert_awaited_once_with("ups_settings", {"enabled": False})
+            target.node_rpc.reset_mock()
+            with pytest.raises(PeerError, match="rejected"):
+                await nodes["c"].request("b", "ups_settings", {"enabled": True})
+            target.node_rpc.assert_not_awaited()
+            await nodes["c"].request("b", "node_info", {})
+            target.node_rpc.assert_awaited_once_with("node_info", {})
+            del target.node_rpc
+            with pytest.raises(PeerError, match="rejected"):
+                await nodes["a"].request("b", "public_ip", {})
+    asyncio.run(run())

@@ -57,7 +57,7 @@ class Envelope(BaseModel):
     request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     issued_at: int
     application_key: str = ""
-    operation: Literal["snapshot", "power", "health", "notify", "history", "monitor_settings", "update_status", "update_install"]
+    operation: Literal["snapshot", "power", "health", "notify", "history", "monitor_settings", "update_status", "update_install", "node_info", "public_ip", "ups_settings"]
     payload: dict[str, Any]
 
 
@@ -254,6 +254,13 @@ class PeerService:
         if (msg.network_id != self.config.network_id or msg.application_key != self.application_key or msg.source != peer.node_id
                 or msg.target != self.config.node_id or abs(time.time() - msg.issued_at) > 60):
             raise PeerError("Wrong network, identity, target, or expired request")
+        if msg.operation in {"node_info", "public_ip", "ups_settings"}:
+            if msg.operation == "ups_settings" and peer.node_id != self.config.resolved_state_owner:
+                raise PeerError("Only the configured state owner may change remote UPS settings")
+            handler = getattr(self, "node_rpc", None)
+            if handler is None:
+                raise PeerError("Node commands are unavailable; update this node")
+            return await handler(msg.operation, msg.payload)
         if msg.operation == "health":
             if msg.payload:
                 raise PeerError("Unexpected health parameters")
