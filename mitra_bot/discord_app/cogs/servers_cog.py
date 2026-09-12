@@ -1,4 +1,5 @@
-from __future__ import annotations
+# Pycord evaluates Option objects while decorating commands. Postponed annotations
+# turn these into strings, registering every option as text and breaking parsing.
 
 import discord
 import asyncio

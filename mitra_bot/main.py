@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import discord
+from mitra_bot.discord_app.command_errors import report_command_error
 from mitra_bot.discord_app.bot_factory import AppState, create_bot
 from mitra_bot.logging_setup import setup_logging
 from mitra_bot.storage.storage_schema import RestartNoticeRuntimeModel
@@ -180,16 +181,7 @@ async def main_async() -> None:
     async def on_application_command_error(
         ctx: discord.ApplicationContext, error: Exception
     ) -> None:
-        command_name = _command_name(ctx)
-        guild_id, channel_id, user_id = _ctx_scope(ctx)
-        logging.exception(
-            "Command error: /%s guild_id=%s channel_id=%s user_id=%s err=%s",
-            command_name,
-            guild_id,
-            channel_id,
-            user_id,
-            error,
-        )
+        await report_command_error(ctx, error)
 
     @bot.event
     async def on_disconnect():
