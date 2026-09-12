@@ -9,6 +9,11 @@ from mitra_bot import __version__
 from mitra_bot.discord_app.node_commands import selected_nodes, read_nodes
 from mitra_bot.services.peer_service import PeerError
 
+POLICY_LINKS = (
+    "[Terms of Service](https://github.com/brandonhenness/Mitra-Discord-Bot/blob/main/TERMS_OF_SERVICE.md) · "
+    "[Privacy Policy](https://github.com/brandonhenness/Mitra-Discord-Bot/blob/main/PRIVACY_POLICY.md)"
+)
+
 
 class AboutCog(commands.Cog):
     def __init__(self, bot: discord.Bot) -> None:
@@ -40,6 +45,7 @@ class AboutCog(commands.Cog):
                                  f"Discord: {'connected' if health.get('discord_connected') else 'disconnected'}\n"
                                  f"Discord servers: {data['discord_servers']}")
                     embed.add_field(name=node, value=value, inline=False)
+                embed.description = POLICY_LINKS
                 await ctx.respond(embed=embed, ephemeral=True)
             return
         try:
@@ -50,7 +56,7 @@ class AboutCog(commands.Cog):
         now = int(time.time())
         embed = discord.Embed(
             title="Mitra Bot",
-            description="Operations helper bot for monitoring, power controls, and utility workflows.",
+            description="Operations helper bot for monitoring, power controls, and utility workflows.\n\n" + POLICY_LINKS,
             color=discord.Color.blurple(),
         )
         embed.add_field(name="Version", value=f"`{__version__}`", inline=True)
