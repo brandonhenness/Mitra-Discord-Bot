@@ -67,7 +67,7 @@ def test_token_exchange_reports_invalid_grant_without_secret_body(monkeypatch):
 
 @pytest.mark.parametrize("choice,mode", [("1", None), ("2", "2")])
 def test_retry_or_manual_fallback_does_not_repeat_discord(monkeypatch, choice, mode):
-    configure = Mock(side_effect=[auth.CloudflareOAuthError("invalid_scope"), None])
+    configure = Mock(side_effect=[auth.CloudflareOAuthError("invalid_scope"), True])
     monkeypatch.setattr(cloudflare_setup, "configure_cloudflare", configure)
     monkeypatch.setattr("builtins.input", lambda _: choice)
     assert cloudflare_setup.run_cloudflare_setup(env_file="custom.env", open_browser=False)

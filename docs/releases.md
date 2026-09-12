@@ -43,3 +43,31 @@ unattended fleet-wide upgrades or add transactional rollback. Test upgrades on o
 peer first, back up runtime files, then update other peers. GitHub's actual hosted
 workflow must run after the changes reach the repository; local tests cannot exercise
 repository permissions, tag protection or release publication.
+
+## Before promoting a beta
+
+Pull-request CI builds the wheel, source distribution, deployment ZIP and checksum
+manifest on Windows/Linux and Python 3.10/3.13. It installs the wheel outside the
+checkout and the ZIP in a separate environment and checks setup entry points.
+These jobs have read-only repository permissions and do not publish releases.
+Follow [two-server beta acceptance](beta-acceptance.md) before publishing stable.
+
+## In-process update recovery
+
+The Discord updater saves files it will replace under `.recovery/update-<id>/`
+and journals progress in `manifest.json` before changing code. A copy, dependency
+installation, or fresh-interpreter import/version check failure restores prior
+files and removes newly added files. When dependency installation has started,
+it also attempts to reinstall dependencies from the restored project metadata.
+Backups remain after success or failure. Runtime secrets, configuration and
+telemetry are excluded from the file replacement/rollback operation.
+
+If dependency recovery fails, keep the bot stopped and repair the environment
+using the restored project metadata before restarting. Preserve the backup until
+recovery is verified. This is not a filesystem transaction: forced termination,
+power loss, or disk failure can require manual recovery from the manifest and
+backup. Do not run two updater processes against one installation.
+
+The import check does not start the bot or prove Discord reconnection. Live
+startup/failover acceptance is still required. The separate PowerShell deployment
+script retains its existing backup-first, manual-recovery procedure.

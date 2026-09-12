@@ -74,3 +74,19 @@ and configure subscriptions. Creating the network does not subscribe users autom
 The wizard also offers Cloudflare setup after private-peer setup. You can run it
 independently with `uv run mitra-cloudflare-setup`. See [Cloudflare setup](cloudflare.md)
 for browser authorization, multiple accounts/domains and per-server DNS assignments.
+
+## Final health checks
+
+Setup finishes with health checks. Rerun them with
+`uv run mitra-doctor --env-file .env` (add `--plain` for plain output).
+Checks authenticate the Discord token, read the configured channel, check UPS
+database integrity, verify peer TLS certificates, and read this server's
+Cloudflare A records. They send no Discord messages and make no DNS changes;
+expired OAuth credentials may be refreshed locally.
+CHECK results include a next step and do not discard saved setup. The standalone
+command exits with code 1 when attention is needed.
+
+These checks do not prove Discord send/role permissions, USB operation, or full
+peer application compatibility. A peer not started yet will show CHECK; start
+both bots and run `/servers doctor` for application-level diagnostics.
+Cancelled Cloudflare setup is reported as skipped, separately from failure.

@@ -24,3 +24,28 @@ jobs:
       - run: uv sync --locked
       - run: uv run --no-sync python -m mitra_bot.release_tools check
       - run: uv run --no-sync python -m pytest -q -m "not integration" --basetemp=.recovery/ci-tests --tb=short
+      - name: Build release artifacts without publishing
+        run: |
+          uv build
+          uv run --no-sync python -m mitra_bot.release_tools bundle
+          uv run --no-sync python -m mitra_bot.release_tools checksums
+      - name: Install wheel outside the source checkout
+        shell: bash
+        run: |
+          uv venv .wheel-test
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file .wheel-test/constraints.txt --quiet
+          if [ "$RUNNER_OS" = Windows ]; then BIN=Scripts; PY=python.exe; else BIN=bin; PY=python; fi
+          uv pip install --python ".wheel-test/$BIN/$PY" --constraint .wheel-test/constraints.txt dist/*.whl
+          cd .wheel-test
+          "$BIN/mitra-setup" --help
+          "$BIN/mitra-cloudflare-setup" --help
+          "$BIN/mitra-peer-init" --help
+          "$BIN/mitra-doctor" --help
+      - name: Install deployment ZIP in a clean directory
+        shell: bash
+        run: |
+          uv run --no-sync python -c "import glob,zipfile; zipfile.ZipFile(glob.glob('dist/mitra-discord-bot-*.zip')[0]).extractall('.zip-test')"
+          cd .zip-test/mitra-discord-bot-*
+          uv sync --frozen --no-dev
+          uv run --no-sync mitra-setup --help
+          uv run --no-sync mitra-doctor --help

@@ -37,6 +37,7 @@ mitra-migrate-cache = "mitra_bot.migrate_legacy_cache:main"
 mitra-peer-init = "mitra_bot.init_peers:main"
 mitra-setup = "mitra_bot.setup_wizard:main"
 mitra-cloudflare-setup = "mitra_bot.cloudflare_setup:main"
+mitra-doctor = "mitra_bot.setup_health:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mitra_bot"]

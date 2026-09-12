@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import zipfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,7 @@ from mitra_bot.storage.storage_store import get_updater_config, set_updater_conf
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _GITHUB_REMOTE_RE = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+)(?:\.git)?$")
+_INSTALL_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -316,7 +318,29 @@ def _install_requirements() -> None:
     )
 
 
+def _startup_preflight(version):
+    # A fresh interpreter catches missing dependencies/import failures without
+    # logging into Discord, starting monitoring, or executing hardware actions.
+    code = (
+        "from mitra_bot import __version__; "
+        "from packaging.version import Version; "
+        "import mitra_bot.main, mitra_bot.setup_wizard, mitra_bot.cloudflare_setup; "
+        f"assert Version(__version__) == Version({version!r})"
+    )
+    subprocess.run([sys.executable, "-c", code], cwd=PROJECT_ROOT,
+                   check=True, capture_output=True, text=True, timeout=60)
+
+
 def install_release(release: ReleaseInfo) -> InstallResult:
+    if not _INSTALL_LOCK.acquire(blocking=False):
+        return InstallResult(ok=False, error="An update is already running on this process.")
+    try:
+        return _install_release(release)
+    finally:
+        _INSTALL_LOCK.release()
+
+
+def _install_release(release: ReleaseInfo) -> InstallResult:
     try:
         with tempfile.TemporaryDirectory(prefix="mitra-update-") as tmpdir:
             tmp_path = Path(tmpdir)
@@ -357,8 +381,32 @@ def install_release(release: ReleaseInfo) -> InstallResult:
             if release.asset_name:
                 from mitra_bot.release_tools import check
                 check(source_root, release.version)
-            _copy_release_tree(source_root, PROJECT_ROOT)
-            _install_requirements()
+            from mitra_bot.services.update_recovery import Recovery
+            recovery = Recovery(source_root, PROJECT_ROOT)
+            dependencies_started = False
+            try:
+                recovery.record("copying")
+                _copy_release_tree(source_root, PROJECT_ROOT)
+                recovery.record("installing_dependencies")
+                dependencies_started = True
+                _install_requirements()
+                recovery.record("checking_imports")
+                _startup_preflight(release.version)
+                recovery.record("validated")
+            except Exception:
+                recovery.failed_stage = recovery.stage
+                try:
+                    recovery.restore()
+                except Exception:
+                    return InstallResult(ok=False, error=f"Update failed and file restoration failed. Keep the bot stopped; recover from {recovery.folder}.")
+                if dependencies_started:
+                    try:
+                        _install_requirements()
+                    except Exception:
+                        recovery.record("dependency_recovery_failed")
+                        return InstallResult(ok=False, error=f"Update failed. Previous files restored, but dependencies need repair. Keep the bot stopped; recovery backup: {recovery.folder}.")
+                recovery.record("rolled_back")
+                return InstallResult(ok=False, error=f"Update failed during {recovery.failed_stage}; previous files restored. Dependency recovery was attempted when needed. Backup: {recovery.folder}.")
 
         set_updater_config(
             {

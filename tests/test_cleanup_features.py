@@ -187,7 +187,7 @@ def test_guided_setup_configures_guild_without_opening_browser(monkeypatch, tmp_
     config = setup_wizard.read_config_dict()
     assert config['bot']['channel_id'] == 999
     assert not config['ups']['enabled']
-    assert calls[-1][:2] == ('PUT','/guilds/456/members/789/roles/888')
+    assert any(call[:2] == ('PUT','/guilds/456/members/789/roles/888') for call in calls)
 
 
 def test_invalid_token_does_not_replace_existing_secret(monkeypatch, tmp_path):

@@ -260,7 +260,11 @@ def guided_setup(*,env_file=".env",open_browser=True):
     cloudflare_result = "Existing settings retained"
     if yes("Set up Cloudflare DNS updates for this server?", False):
         from mitra_bot.cloudflare_setup import run_cloudflare_setup
-        cloudflare_result = "Setup finished" if run_cloudflare_setup(env_file=env_file, open_browser=open_browser) else "Unfinished — resume with mitra-cloudflare-setup"
+        outcome = run_cloudflare_setup(env_file=env_file, open_browser=open_browser)
+        cloudflare_result = {True: "Setup finished", False: "Unfinished - resume with mitra-cloudflare-setup",
+                             None: "Skipped - existing settings retained"}[outcome]
+    from mitra_bot.setup_health import show_health
+    show_health(env_file=env_file)
     ui.summary([("Discord", application.get("name", "Connected")), ("UPS monitoring", "Enabled" if cfg["ups"]["enabled"] else "Disabled"), ("Cloudflare", cloudflare_result)])
     ui.message("Setup saved. Start with: uv run --env-file " + str(env_file) + " mitra-bot")
     ui.message("Without uv: .venv\\Scripts\\python.exe -m mitra_bot.main (uses .env by default).")

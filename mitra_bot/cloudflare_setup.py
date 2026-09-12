@@ -151,14 +151,15 @@ def configure_cloudflare(*, env_file=".env", open_browser=True, client_id=None, 
     cfg["cloudflare"] = dict(enabled=True, targets=targets)
     write_config_dict(cfg)
     ui.message("Cloudflare setup saved. Restart the bot to reconcile DNS for this server.")
+    return True
 
 
 def run_cloudflare_setup(*, env_file=".env", open_browser=True, client_id=None):
+    # True: saved; None: skipped/cancelled; False: failed and deferred.
     mode = None
     while True:
         try:
-            configure_cloudflare(env_file=env_file, open_browser=open_browser, client_id=client_id, auth_method=mode)
-            return True
+            return configure_cloudflare(env_file=env_file, open_browser=open_browser, client_id=client_id, auth_method=mode)
         except (RuntimeError, ValueError, OSError) as exc:
             ui.message(f"Cloudflare setup could not finish: {exc}")
             ui.message("Completed Discord setup is retained. Any DNS records already reported as created remain; retrying discovers them.")
@@ -225,7 +226,7 @@ def main():
         if args.repair_client:
             repair_client(client_id=args.client_id, open_browser=not args.no_browser)
             return
-        if not run_cloudflare_setup(env_file=args.env_file, open_browser=not args.no_browser, client_id=args.client_id):
+        if run_cloudflare_setup(env_file=args.env_file, open_browser=not args.no_browser, client_id=args.client_id) is False:
             parser.exit(1, "Cloudflare setup left unfinished; rerun this command when ready.\n")
     except (RuntimeError, ValueError, OSError, KeyboardInterrupt) as exc:
         parser.exit(1, f"Cloudflare setup stopped: {exc}\nAny DNS creations already reported remain in Cloudflare; rerun to reuse them.\n")

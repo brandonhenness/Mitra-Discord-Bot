@@ -90,6 +90,7 @@ jobs:
           bin/python -m mitra_bot.setup_wizard --help
           bin/python -m mitra_bot.init_peers --help
           bin/python -m mitra_bot.cloudflare_setup --help
+          bin/python -m mitra_bot.setup_health --help
       - name: Publish versioned tag and release assets
         run: |
           git config user.name 'github-actions[bot]'
