@@ -82,7 +82,7 @@ function Protect-OutputText([string]$Text) {
     )
     $safe = [regex]::Replace(
         $safe,
-        '(?i)\b(DISCORD_APPLICATION_TOKEN|CLOUDFLARE_API_TOKEN|API_KEY|PASSWORD)\s*[:=]\s*\S+',
+        '(?i)\b(DISCORD_APPLICATION_TOKEN|CLOUDFLARE_(?:[A-Z0-9_]+_)?API_TOKEN|API_KEY|PASSWORD)\s*[:=]\s*\S+',
         '$1=***'
     )
     $safe = [regex]::Replace(
@@ -484,7 +484,7 @@ function Read-SelectedEnvSecrets([string]$ResolvedEnvPath) {
                 continue
             }
             $key = $match.Groups["key"].Value.ToUpperInvariant()
-            if ($key -ne "DISCORD_APPLICATION_TOKEN" -and $key -ne "CLOUDFLARE_API_TOKEN") {
+            if ($key -ne "DISCORD_APPLICATION_TOKEN" -and $key -notmatch '^CLOUDFLARE_(?:[A-Z0-9_]+_)?API_TOKEN$') {
                 continue
             }
             if ($seen.ContainsKey($key)) {
@@ -504,7 +504,9 @@ function Read-SelectedEnvSecrets([string]$ResolvedEnvPath) {
 
 function Assert-SelectedEnvSecretCompatibility([string]$ResolvedEnvPath) {
     $fileSecrets = Read-SelectedEnvSecrets $ResolvedEnvPath
-    foreach ($key in @("DISCORD_APPLICATION_TOKEN", "CLOUDFLARE_API_TOKEN")) {
+    $secretKeys = @("DISCORD_APPLICATION_TOKEN", "CLOUDFLARE_API_TOKEN") + @($fileSecrets.Keys)
+    $secretKeys += @(Get-ChildItem Env: | Where-Object { $_.Name -match '^CLOUDFLARE_(?:[A-Z0-9_]+_)?API_TOKEN$' } | Select-Object -ExpandProperty Name)
+    foreach ($key in @($secretKeys | Sort-Object -Unique)) {
         $fromFile = if ($fileSecrets.ContainsKey($key)) { ([string]$fileSecrets[$key]).Trim() } else { "" }
         $fromProcess = ([string][System.Environment]::GetEnvironmentVariable($key, "Process")).Trim()
         if ($fromProcess -and -not $fromFile) {
@@ -865,7 +867,7 @@ function Get-ConfiguredLegacyUpsLog([string]$LegacyCachePath, [string]$ResolvedR
     return $null
 }
 
-function Get-ConfiguredTomlUpsLog([string]$ConfigPath, [string]$ResolvedRepoPath) {
+function Get-ConfiguredTomlUpsLog([string]$ConfigPath, [string]$ResolvedRepoPath, [string]$SettingName = "log_file") {
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
         return $null
     }
@@ -876,7 +878,7 @@ function Get-ConfiguredTomlUpsLog([string]$ConfigPath, [string]$ResolvedRepoPath
                 $insideUps = ($matches[1].Trim().ToLowerInvariant() -eq "ups")
                 continue
             }
-            if ($insideUps -and $line -match '^\s*log_file\s*=\s*"([^"]+)"') {
+            if ($insideUps -and $line -match ('^\s*' + [regex]::Escape($SettingName) + '\s*=\s*"([^"]+)"')) {
                 $raw = [string]$matches[1]
                 if ([System.IO.Path]::IsPathRooted($raw)) {
                     return (Get-FullPath $raw)
@@ -921,6 +923,7 @@ function Backup-RuntimeFiles(
 
     Add-BackupCandidate $candidates $seen $legacyCache "runtime\cache.json"
     Add-BackupCandidate $candidates $seen $ResolvedConfigPath "runtime\config.toml"
+    Add-BackupCandidate $candidates $seen (Join-Path (Split-Path -Parent $ResolvedConfigPath) ".env.cloudflare-oauth.json") "runtime\env\cloudflare-oauth.json"
     Add-BackupCandidate $candidates $seen $ResolvedStatePath "runtime\state.db"
     Add-BackupCandidate $candidates $seen ($ResolvedStatePath + "-wal") "runtime\state.db-wal"
     Add-BackupCandidate $candidates $seen ($ResolvedStatePath + "-shm") "runtime\state.db-shm"
@@ -950,7 +953,7 @@ function Backup-RuntimeFiles(
     # Include the default and commonly named UPS logs, plus any legacy/config
     # log path we can discover without evaluating configuration as code.
     $logFiles = New-Object System.Collections.ArrayList
-    foreach ($pattern in @("*.jsonl", "ups*.log", "ups*.csv")) {
+    foreach ($pattern in @("*.jsonl", "*.db", "*.db-wal", "*.db-shm", "ups*.log", "ups*.csv", "peer-network.toml", "*.crt", "*.key")) {
         foreach ($logFile in @(Get-ChildItem -Path (Join-Path $ResolvedRepoPath $pattern) -Force -File -ErrorAction SilentlyContinue)) {
             [void]$logFiles.Add($logFile)
         }
@@ -969,6 +972,18 @@ function Backup-RuntimeFiles(
     $tomlConfiguredLog = Get-ConfiguredTomlUpsLog $ResolvedConfigPath $ResolvedRepoPath
     if ($tomlConfiguredLog) {
         [void]$logFiles.Add([pscustomobject]@{ FullName = $tomlConfiguredLog; Name = (Split-Path -Leaf $tomlConfiguredLog) })
+    }
+    $configuredDatabase = Get-ConfiguredTomlUpsLog $ResolvedConfigPath $ResolvedRepoPath "database_file"
+    foreach ($upsPath in @($legacyConfiguredLog, $tomlConfiguredLog, $configuredDatabase)) {
+        if (-not $upsPath) { continue }
+        $databasePath = [string]$upsPath
+        if ([System.IO.Path]::GetExtension($databasePath) -in @(".jsonl", ".ndjson")) {
+            $databasePath = [System.IO.Path]::ChangeExtension($databasePath, ".db")
+        }
+        foreach ($suffix in @("", "-wal", "-shm", "-journal")) {
+            $candidatePath = $databasePath + $suffix
+            [void]$logFiles.Add([pscustomobject]@{ FullName = $candidatePath; Name = (Split-Path -Leaf $candidatePath) })
+        }
     }
 
     $logIndex = 0
@@ -1242,7 +1257,18 @@ if not selected_secret("DISCORD_APPLICATION_TOKEN"):
         "Selected runtime env file is missing DISCORD_APPLICATION_TOKEN."
     )
 cloudflare = validated_config.cloudflare
-if cloudflare.enabled:
+if cloudflare.enabled and cloudflare.targets is not None:
+    from mitra_bot.services.cloudflare_verify import verify_targets
+    os.environ["MITRA_CONFIG_PATH"] = str(config_path)
+    if env_values.get("MITRA_PEER_CONFIG_PATH"):
+        os.environ["MITRA_PEER_CONFIG_PATH"] = env_values["MITRA_PEER_CONFIG_PATH"]
+    logging.disable(logging.CRITICAL)
+    try:
+        count = verify_targets([t.model_dump() for t in cloudflare.targets], selected_secret, write=verify_cloudflare_write)
+    except Exception:
+        raise SystemExit("Cloudflare per-server verification failed; check local credentials, assignments and connectivity.") from None
+    print(f"Cloudflare per-server verification OK ({count} A record(s); write={verify_cloudflare_write})")
+elif cloudflare.enabled:
     cloudflare_token = selected_secret("CLOUDFLARE_API_TOKEN")
     if not cloudflare_token:
         raise SystemExit(
