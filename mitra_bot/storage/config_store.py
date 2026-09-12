@@ -53,7 +53,7 @@ class BotFileConfigModel(BaseModel):
     channel_id: int | None = None
     ip_poll_seconds: int = 900
     admin_role_name: str = "Mitra Admin"
-    ip_subscriber_role_name: str = "Mitra IP Subscriber"
+    ip_subscriber_role_name: str = "Mitra Alerts"
 
     @field_validator("channel_id", mode="before")
     @classmethod

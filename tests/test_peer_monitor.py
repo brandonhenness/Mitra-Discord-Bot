@@ -324,57 +324,6 @@ def test_dashboard_controls_and_schema_are_valid():
     asyncio.run(run())
 
 
-def test_subscription_rejects_privileged_roles_and_only_changes_invoking_member():
-    async def run():
-        m = monitor()
-        enable(m)
-        role = SimpleNamespace(id=789, permissions=discord.Permissions(administrator=True), managed=False)
-        guild = SimpleNamespace(id=123, get_role=lambda _:role)
-        author = Mock(spec=discord.Member)
-        author.add_roles = AsyncMock()
-        author.remove_roles = AsyncMock()
-        ctx = SimpleNamespace(guild=guild, author=author, respond=AsyncMock())
-        cog = ServersCog(SimpleNamespace(peer_service=m.mesh))
-        await cog._subscription(ctx,"a",True)
-        author.add_roles.assert_not_awaited()
-        assert "permissions changed" in ctx.respond.call_args.args[0]
-        await cog._subscription(ctx,"a",False)
-        author.remove_roles.assert_awaited_once_with(role, reason="Self-service Mitra peer alert unsubscription")
-        m.store.db.close()
-    asyncio.run(run())
-
-
-def test_subscription_does_not_grant_mitra_admin_or_channel_overwrite_access():
-    class Role:
-        id = 789
-        name = "Admin"
-        managed = False
-        permissions = discord.Permissions.none()
-        def __lt__(self, other):
-            return True
-    async def run():
-        m = monitor()
-        enable(m)
-        role = Role()
-        channel = SimpleNamespace(overwrites_for=lambda _:discord.PermissionOverwrite(view_channel=True))
-        guild = SimpleNamespace(id=123, get_role=lambda _:role, me=SimpleNamespace(top_role=object()), channels=[])
-        author = Mock(spec=discord.Member)
-        author.add_roles = AsyncMock()
-        ctx = SimpleNamespace(guild=guild, author=author, respond=AsyncMock())
-        cog = ServersCog(SimpleNamespace(peer_service=m.mesh, state=SimpleNamespace(admin_role_name="Admin")))
-        await cog._subscription(ctx,"a",True)
-        author.add_roles.assert_not_awaited()
-        role.name = "Mitra a alerts"
-        guild.channels = [channel]
-        await cog._subscription(ctx,"a",True)
-        author.add_roles.assert_not_awaited()
-        guild.channels = []
-        await cog._subscription(ctx,"a",True)
-        author.add_roles.assert_awaited_once_with(role, reason="Self-service Mitra peer alert subscription")
-        m.store.db.close()
-    asyncio.run(run())
-
-
 def test_removed_members_do_not_block_retained_history_replication():
     a,b = monitor(node="a"),monitor(node="b")
     a.record("c",health(node="c"),now=1000.0,mono=1000.0)

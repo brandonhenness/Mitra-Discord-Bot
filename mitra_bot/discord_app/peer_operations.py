@@ -163,9 +163,13 @@ async def doctor(mesh, bot, guild):
             channel = bot.get_channel(setting["channel"]) or await bot.fetch_channel(setting["channel"])
             permissions = verify_channel(channel,guild)
             lines.append(f"Alert channel: {channel.mention} · required permissions OK")
+            seen_roles = set()
             for value in store.settings():
                 if value["guild"] != guild.id or not value.get("role"):
                     continue
+                if value["role"] in seen_roles:
+                    continue
+                seen_roles.add(value["role"])
                 role = guild.get_role(value["role"])
                 if role is None:
                     state = "role missing; reconfigure /servers alerts"

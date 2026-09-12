@@ -19,9 +19,9 @@ def test_registered_server_commands_use_discord_option_types():
     # Inspect the payload sent to Discord, not callbacks invoked directly by tests.
     alerts = {"options": [o.to_dict() for o in commands["alerts"].options]}
     assert {o["name"]: o["type"] for o in alerts["options"]} == {
-        "channel": 7, "server": 3, "role": 8, "enabled": 5,
+        "channel": 7, "enabled": 5,
     }
-    assert {o["name"] for o in alerts["options"] if o["required"]} == {"channel", "server"}
+    assert {o["name"] for o in alerts["options"] if o["required"]} == {"channel"}
     assert commands["doctor"].options == []
     assert commands["list"].options == []
     for command in commands.values():

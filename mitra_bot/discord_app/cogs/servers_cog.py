@@ -8,6 +8,7 @@ import inspect
 from discord.ext import commands
 
 from mitra_bot.discord_app.checks import ensure_admin
+from mitra_bot.services.alert_roles import configure_shared_role, subscription
 from mitra_bot.discord_app.peer_dashboard import build_dashboard
 from mitra_bot.services.peer_monitor import Setting, MonitorPolicy
 from mitra_bot.services.peer_service import PeerError
@@ -48,7 +49,7 @@ class ServersCog(commands.Cog):
             channel = self.bot.get_channel(setting["channel"]) or await self.bot.fetch_channel(setting["channel"])
             from mitra_bot.discord_app.peer_operations import verify_channel
             permissions = verify_channel(channel,ctx.guild)
-            role_setting = mesh.monitor.store.setting(ctx.guild.id,server)
+            role_setting = setting if setting.get("role") else mesh.monitor.store.setting(ctx.guild.id,server)
             role = ctx.guild.get_role(role_setting["role"]) if role_setting and role_setting["role"] else None
             if mention and (role is None or not self._safe_role(role,ctx.guild)):
                 raise ValueError("Configure a valid subscriber role before testing mentions.")
@@ -235,78 +236,71 @@ class ServersCog(commands.Cog):
                 and role.name != getattr(getattr(self.bot, "state", None), "admin_role_name", None)
                 and not any(channel.overwrites_for(role).pair()[0].value for channel in guild.channels))
 
-    @servers.command(name="alerts", description="Configure an opt-in alert channel and a server subscriber role")
+    @servers.command(name="alerts", description="Configure the shared Mitra Alerts role and health alert channel")
     async def alerts(self, ctx: discord.ApplicationContext,
-                     channel: discord.Option(discord.TextChannel, "Outage/recovery destination"),
-                     server: discord.Option(str, "Server whose subscription role to configure"),
-                     role: discord.Option(discord.Role, "Existing role with no permissions (otherwise create one)") = None,
-                     enabled: discord.Option(bool, "Enable alerts for this guild") = True):
+                     channel: discord.Option(discord.TextChannel, "Alert destination"),
+                     enabled: discord.Option(bool, "Enable IP and health alerts for this guild") = True):
         mesh = await self._mesh(ctx)
         if not mesh:
             return
         await ctx.defer(ephemeral=True)
         try:
-            mesh.resolve(server)
-            if channel.guild.id != ctx.guild.id:
-                raise ValueError("Choose a channel in this guild.")
-            permissions = channel.permissions_for(ctx.guild.me)
-            if enabled and not all((permissions.view_channel, permissions.send_messages, permissions.embed_links, permissions.read_message_history)):
-                raise ValueError("The bot needs View Channel, Send Messages, Embed Links and Read Message History in that channel.")
-            existing = mesh.monitor.store.setting(ctx.guild.id, server)
-            if role is None and existing and existing["role"]:
-                role = ctx.guild.get_role(existing["role"])
-            name = f"Mitra {server} alerts"
-            if role is None:
-                roles = await ctx.guild.fetch_roles()
-                matches = [r for r in roles if r.name == name]
-                if len(matches) > 1:
-                    raise ValueError("Multiple matching subscriber roles exist. Choose one explicitly and reconcile memberships before removing duplicates.")
-                role = matches[0] if matches else await ctx.guild.create_role(name=name, permissions=discord.Permissions.none(), mentionable=True,
-                                                                            reason="Mitra peer alert subscriptions")
-                if not matches:
-                    roles = await ctx.guild.fetch_roles()
-                    if len([r for r in roles if r.name == name]) > 1:
-                        raise ValueError("Concurrent setup created duplicate roles. Choose one explicitly with /servers alerts; no subscription mapping was saved.")
-            if not self._safe_role(role, ctx.guild):
-                raise ValueError("Choose an unmanaged role below the bot's highest role, with no permissions or channel grants. Mitra's administrator role cannot be used.")
-            if not role.mentionable and not permissions.mention_everyone:
-                raise ValueError("The subscriber role must be mentionable, or the bot must have Mention Everyone in the alert channel.")
+            from mitra_bot.discord_app.peer_operations import verify_channel
+            verify_channel(channel, ctx.guild)
+            role = await configure_shared_role(self.bot, ctx.guild)
             revision = str(ctx.interaction.id)
-            pending = await self._save_settings(mesh, [Setting(revision=revision, guild=ctx.guild.id, subject="*", channel=channel.id, enabled=enabled),
-                                                       Setting(revision=revision, guild=ctx.guild.id, subject=server, role=role.id)])
-            await ctx.respond(f"Alerts {'enabled' if enabled else 'disabled'} in {channel.mention}. `{server}` subscriptions use {role.mention}. "
-                              f"Saved locally; replication pending on {pending} peer(s). Members can use `/servers subscribe server:{server}`.",
+            values = [Setting(revision=revision, guild=ctx.guild.id, subject="*", channel=channel.id, role=role.id, enabled=enabled)]
+            for node in mesh.monitor.store.members:
+                previous = mesh.monitor.store.setting(ctx.guild.id, node)
+                value = Setting.model_validate(previous) if previous else Setting(revision=revision, guild=ctx.guild.id, subject=node)
+                values.append(value.model_copy(update={"revision": revision, "role": role.id}))
+            pending = await self._save_settings(mesh, values)
+            await ctx.respond(f"Health alerts {'enabled' if enabled else 'disabled'} in {channel.mention}. "
+                              f"{role.mention} subscribes to IP changes and health alerts for all servers. "
+                              f"Existing subscribers migrated. Replication pending on {pending} peer(s). "
+                              "Use `/alerts subscribe` or `/alerts unsubscribe`.",
                               allowed_mentions=discord.AllowedMentions.none(), ephemeral=True)
         except (PeerError, ValueError, discord.HTTPException) as exc:
             await ctx.respond(f"Could not configure alerts: {exc}", ephemeral=True)
 
-    async def _subscription(self, ctx, server, subscribe):
-        mesh = await self._mesh(ctx, admin=False)
-        if not mesh:
+    alerts_group = discord.SlashCommandGroup("alerts", "Unified Mitra alert subscriptions")
+
+    @alerts_group.command(name="setup", description="Set up Mitra Alerts and migrate existing subscribers (admins only)")
+    async def alerts_setup(self, ctx: discord.ApplicationContext,
+                           channel: discord.Option(discord.TextChannel, "Alert destination")):
+        if getattr(self.bot, "peer_service", None):
+            await ServersCog.alerts.callback(self, ctx, channel)
             return
+        guard = ensure_admin(ctx)
+        if guard:
+            await guard
+            return
+        await ctx.defer(ephemeral=True)
         try:
-            mesh.resolve(server)
-            setting = mesh.monitor.store.setting(ctx.guild.id, server)
-            role = ctx.guild.get_role(setting["role"]) if setting and setting["role"] else None
-            if role is None:
-                raise ValueError("An administrator must configure this server's role with /servers alerts first.")
-            if subscribe and not self._safe_role(role, ctx.guild):
-                raise ValueError("Subscriber role permissions changed; ask an administrator to configure a role with no permissions.")
-            if subscribe:
-                await ctx.author.add_roles(role, reason="Self-service Mitra peer alert subscription")
-            else:
-                await ctx.author.remove_roles(role, reason="Self-service Mitra peer alert unsubscription")
-            await ctx.respond(f"{'Subscribed to' if subscribe else 'Unsubscribed from'} `{server}` alerts.", ephemeral=True)
-        except (PeerError, ValueError, discord.HTTPException) as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            from mitra_bot.discord_app.peer_operations import verify_channel
+            from mitra_bot.storage.storage_store import set_notification_channel_id_for_guild
+            verify_channel(channel, ctx.guild)
+            await configure_shared_role(self.bot, ctx.guild)
+            set_notification_channel_id_for_guild(ctx.guild.id, channel.id)
+            await ctx.respond("Mitra Alerts configured. Use /alerts subscribe for all operational alerts.", ephemeral=True)
+        except (ValueError, discord.HTTPException) as exc:
+            await ctx.respond(f"Could not configure alerts: {exc}", ephemeral=True)
 
-    @servers.command(name="subscribe", description="Subscribe yourself to a server's outage and recovery alerts")
-    async def subscribe(self, ctx: discord.ApplicationContext, server: discord.Option(str, "Server ID")):
-        await self._subscription(ctx, server, True)
+    @alerts_group.command(name="subscribe", description="Subscribe to all Mitra operational alerts")
+    async def alerts_subscribe(self, ctx: discord.ApplicationContext):
+        await subscription(ctx, True)
 
-    @servers.command(name="unsubscribe", description="Unsubscribe yourself from a server's alerts")
-    async def unsubscribe(self, ctx: discord.ApplicationContext, server: discord.Option(str, "Server ID")):
-        await self._subscription(ctx, server, False)
+    @alerts_group.command(name="unsubscribe", description="Unsubscribe from all Mitra operational alerts")
+    async def alerts_unsubscribe(self, ctx: discord.ApplicationContext):
+        await subscription(ctx, False)
+
+    @servers.command(name="subscribe", description="Subscribe to all Mitra operational alerts")
+    async def subscribe(self, ctx: discord.ApplicationContext):
+        await subscription(ctx, True)
+
+    @servers.command(name="unsubscribe", description="Unsubscribe from all Mitra operational alerts")
+    async def unsubscribe(self, ctx: discord.ApplicationContext):
+        await subscription(ctx, False)
 
     @servers.command(name="monitoring", description="View or change shared network monitoring thresholds and retention")
     async def monitoring(self, ctx: discord.ApplicationContext,

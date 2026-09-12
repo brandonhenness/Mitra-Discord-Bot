@@ -22,6 +22,7 @@ from mitra_bot.peer_config import load_peer_config
 from mitra_bot.services.peer_service import PeerService
 from mitra_bot.services.power_service import execute_power_action
 from mitra_bot.services.role_manager import ensure_role
+from mitra_bot.services.alert_roles import shared_role
 from mitra_bot.tasks.ip_monitor_task import IPMonitorTask
 from mitra_bot.tasks.update_monitor_task import UpdateMonitorTask
 from mitra_bot.tasks.ups_monitor_task import UPSMonitorTask
@@ -73,7 +74,7 @@ async def main_async() -> None:
             if notification.channel_id:
                 channel = bot.get_channel(notification.channel_id) or await bot.fetch_channel(notification.channel_id)
                 if notification.mention_ip_subscribers and getattr(channel, "guild", None):
-                    role = discord.utils.get(channel.guild.roles, name=settings.ip_subscriber_role_name)
+                    role = shared_role(channel.guild) or discord.utils.get(channel.guild.roles, name=settings.ip_subscriber_role_name)
                     if role:
                         if not role.mentionable:
                             await role.edit(mentionable=True, reason="Mitra IP change notification")
@@ -212,7 +213,6 @@ async def main_async() -> None:
         if bot.owns_application_state:
             for guild in bot.guilds:
                 await ensure_role(guild, settings.admin_role_name)
-                await ensure_role(guild, settings.ip_subscriber_role_name)
 
         logging.info(
             "Starting tasks: ip_monitor=%ss ups_monitor=%ss update_monitor=%ss",

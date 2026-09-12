@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands
 
 from mitra_bot.discord_app.checks import ensure_admin
+from mitra_bot.services.alert_roles import shared_role
 from mitra_bot.discord_app.command_errors import report_command_error
 from mitra_bot.services.update_service import (
     InstallResult,
@@ -246,9 +247,12 @@ class UpdateCog(commands.Cog):
             color=discord.Color.orange(),
             description="A new release is available. Admins can install it using the button below.",
         )
+        role = shared_role(channel.guild) if getattr(channel, "guild", None) else None
         await channel.send(
+            content=role.mention if role else None,
             embed=embed,
             view=UpdatePromptView(self, check.release, source=source),
+            allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else []),
         )
         set_updater_config({"last_notified_version": check.release.version})
 

@@ -1,3 +1,5 @@
+> Subscription update: the implemented UI now uses one `Mitra Alerts` role for all servers and IP changes. See [current setup](peer-uptime-monitoring.md). Per-server roles below describe the original design.
+
 # Peer availability monitoring and dashboard implementation plan
 
 Status: core implementation completed September 8, 2026. Persistent observations,
