@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mitra-discord-bot"
-version = "0.2.0b6"
+version = "0.2.0b7"
 description = "Mitra Discord bot for home/server operations monitoring and controls."
 readme = "README.md"
 requires-python = ">=3.10"
