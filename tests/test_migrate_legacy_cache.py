@@ -742,8 +742,9 @@ def test_windows_atomic_replacement_preserves_custom_dacls(tmp_path: Path) -> No
 
     restrict_acl = r"""
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-$security = New-Object System.Security.AccessControl.FileSecurity
-$security.SetOwner($sid)
+# Change only the DACL under test. Assigning ownership can require privileges
+# unavailable to the hosted runner even when it can edit file permissions.
+$security = Get-Acl -LiteralPath $target
 $security.SetAccessRuleProtection($true, $false)
 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
     $sid,
@@ -758,7 +759,7 @@ Set-Acl -LiteralPath $target -AclObject $security
         return "'" + str(path).replace("'", "''") + "'"
 
     for path in (config_path, env_path):
-        subprocess.run(
+        result = subprocess.run(
             [
                 "powershell.exe",
                 "-NoProfile",
@@ -766,10 +767,12 @@ Set-Acl -LiteralPath $target -AclObject $security
                 "-Command",
                 f"$target = {powershell_literal(path)}\n{restrict_acl}",
             ],
-            check=True,
+            check=False,
             capture_output=True,
             text=True,
         )
+
+        assert result.returncode == 0, result.stderr
 
     before = {
         path: subprocess.run(
