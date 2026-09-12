@@ -928,7 +928,7 @@ wheels = [
 
 [[package]]
 name = "mitra-discord-bot"
-version = "0.2.0b7"
+version = "0.2.0b8"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
