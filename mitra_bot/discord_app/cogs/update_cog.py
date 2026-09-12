@@ -74,9 +74,10 @@ class UpdatePromptView(discord.ui.View):
         await interaction.response.defer()
         fleet = getattr(self.cog.bot, "fleet_updates", None)
         if fleet is not None:
-            plan = await fleet.begin(self.server, self.release.version, interaction.user.id)
+            plan = await fleet.begin(self.server, self.release.version, interaction.user.id,
+                                     channel_id=interaction.channel_id)
             await interaction.edit_original_response(content=f"Rolling update `{plan['id']}` started for `{self.server}`. "
-                "Use `/update status` for persistent progress. The rollout stops if a node fails to recover.", embed=None, view=None)
+                "Progress is posted in this channel; `/update status` also works. The rollout stops if a node fails to recover.", embed=None, view=None)
             self.stop()
             return
         await self.cog.install_release_with_feedback(
@@ -559,7 +560,7 @@ class UpdateCog(commands.Cog):
             if plans:
                 plan = plans[0]
                 lines = [f"Rolling update `{plan['id']}` ? `{plan['version']}` ? **{plan['state']}**"]
-                lines += [f"`{n['node']}`: {n['state']}" for n in plan["nodes"]]
+                lines += [f"`{n['node']}`: {n.get('phase') or n['state']}" for n in plan["nodes"]]
                 if plan.get("error"):
                     lines.append(plan["error"])
                 text = "\n".join(lines)

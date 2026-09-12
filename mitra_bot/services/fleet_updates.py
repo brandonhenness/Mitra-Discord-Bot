@@ -8,6 +8,7 @@ import uuid
 from urllib.parse import quote
 
 import requests
+import discord
 
 from packaging.version import Version
 
@@ -37,6 +38,7 @@ class FleetUpdates:
         self.bot, self.mesh, self.db = bot, mesh, mesh.db
         self.tasks = set()
         self.running_version = __version__
+        self.report_locks = {}
 
     def spawn(self, coro):
         task = asyncio.create_task(coro)
@@ -44,9 +46,85 @@ class FleetUpdates:
         task.add_done_callback(self.tasks.discard)
 
     def save(self, table, value):
+        if table == "update_plans":
+            previous = self.db.execute("SELECT value FROM update_plans WHERE id=?", (value["id"],)).fetchone()
+            if previous and json.loads(previous[0]).get("message"):
+                value["message"] = json.loads(previous[0])["message"]
         with self.db:
             self.db.execute(f"INSERT OR REPLACE INTO {table}(id,value) VALUES (?,?)",
                             (value["id"], json.dumps(value)))
+        if table == "update_plans" and value.get("channel"):
+            self.spawn(self.publish(value["id"]))
+
+    @staticmethod
+    def progress_text(plan):
+        lines = [f"Mitra rolling update `{plan['version']}` · **{plan['state']}**",
+                 f"Plan `{plan['id']}`"]
+        labels = {"pending": "waiting", "waiting": "starting", "accepted": "starting",
+                  "restarting": "reconnecting", "skipped": "already current"}
+        for entry in plan["nodes"][:20]:
+            state = entry.get("phase") or entry["state"]
+            lines.append(f"`{entry['node']}`: {labels.get(state, state)}")
+        if len(plan["nodes"]) > 20:
+            lines.append("Additional nodes: use /update status for the full list.")
+        if plan.get("error"):
+            lines += [str(plan["error"])[:400],
+                      "Rollout stopped. Inspect the failed node's bot.log and .recovery files; "
+                      "run /servers doctor and /update status before starting a new rollout."]
+        if plan["state"] == "cancelled":
+            lines.append("An installation already started can finish; no further nodes will start.")
+        return "\n".join(lines)[:1950]
+
+    async def publish(self, plan_id):
+        async with self.report_locks.setdefault(plan_id, asyncio.Lock()):
+            plan = next((p for p in self.rows("update_plans") if p["id"] == plan_id), None)
+            if not plan or not plan.get("channel"):
+                return
+            try:
+                if not self.bot.is_ready():
+                    await self.bot.wait_until_ready()
+                channel = self.bot.get_channel(plan["channel"]) or await self.bot.fetch_channel(plan["channel"])
+                content = self.progress_text(plan)
+                if plan.get("message"):
+                    await channel.get_partial_message(plan["message"]).edit(content=content, allowed_mentions=discord.AllowedMentions.none())
+                else:
+                    # A stable nonce makes a retried creation deduplicatable after an ambiguous response.
+                    from discord.http import Route
+                    result = await self.bot.http.request(Route("POST", "/channels/{channel_id}/messages", channel_id=channel.id),
+                        json={"content": content, "nonce": str(int(plan_id[:15], 16)), "enforce_nonce": True,
+                              "allowed_mentions": {"parse": []}})
+                    # Reload: the rollout may have advanced while Discord was responding.
+                    plan = next(p for p in self.rows("update_plans") if p["id"] == plan_id)
+                    plan["message"] = int(result["id"])
+                    with self.db:
+                        self.db.execute("UPDATE update_plans SET value=? WHERE id=?", (json.dumps(plan), plan_id))
+            except Exception:
+                logging.exception("Could not refresh rolling update progress; use /update status")
+
+    async def maintenance(self, plan, entry, *, finish=False):
+        monitor = getattr(self.mesh, "monitor", None)
+        if monitor is None:
+            return
+        from datetime import datetime, timezone
+        from mitra_bot.services.peer_monitor import Setting
+        old = monitor.store.setting(1, entry["node"])
+        reason = f"Rolling update {plan['id']}"
+        if finish:
+            if not old or old.get("maintenance_reason") != reason:
+                return
+        elif old and old.get("maintenance_until", 0) > time.time() and old.get("maintenance_reason") != reason:
+            return  # Preserve an administrator's existing maintenance window.
+        revision = str(max(int(old["revision"])+1 if old else 0,
+                           discord.utils.time_snowflake(datetime.now(timezone.utc), high=True)))
+        value = Setting.model_validate(old) if old else Setting(revision=revision, guild=1, subject=entry["node"])
+        value = value.model_copy(update=dict(revision=revision, maintenance_until=0.0 if finish else entry["deadline"],
+                                            maintenance_reason="" if finish else reason))
+        with self.db:
+            monitor.store.append("setting", value.model_dump())
+        results = await asyncio.gather(*(self.mesh.request(peer, "monitor_settings", value.model_dump(), timeout=3)
+                                        for peer in self.mesh.peers), return_exceptions=True)
+        if any(isinstance(result, Exception) for result in results):
+            logging.warning("Update maintenance replication pending; disconnected observers may still alert")
 
     def rows(self, table):
         return [json.loads(r[0]) for r in self.db.execute(f"SELECT value FROM {table} ORDER BY rowid DESC")]
@@ -65,6 +143,8 @@ class FleetUpdates:
             for plan in self.rows("update_plans"):
                 if plan["state"] == "running":
                     self.spawn(self.run_plan(plan))
+                elif plan.get("channel"):
+                    self.spawn(self.publish(plan["id"]))
 
     async def close(self):
         for task in list(self.tasks):
@@ -152,7 +232,7 @@ class FleetUpdates:
                 raise ValueError(f"{node} is unreachable, disconnected from Discord, or lacks rolling-update support. Update older peers manually first.") from None
         return states
 
-    async def begin(self, server, version, actor):
+    async def begin(self, server, version, actor, channel_id=None):
         if not self.mesh.is_state_owner:
             raise ValueError("Only the application-state owner can coordinate updates")
         if any(p["state"] == "running" for p in self.rows("update_plans")):
@@ -162,6 +242,7 @@ class FleetUpdates:
         if any(p["state"] == "running" for p in self.rows("update_plans")):
             raise ValueError("A rolling update is already running")
         plan = dict(id=uuid.uuid4().hex, version=version, actor=actor, state="running", error=None,
+                    channel=channel_id,
                     nodes=[dict(node=n, job=uuid.uuid4().hex, boot=s["boot"], state="pending", deadline=None)
                            for n, s in states.items()])
         self.save("update_plans", plan)
@@ -197,6 +278,7 @@ class FleetUpdates:
                         continue
                     entry.update(state="waiting", boot=status["boot"], deadline=time.time()+1800)
                     self.save("update_plans", plan)
+                await self.maintenance(plan, entry)
                 # Persisted job ID makes an ambiguous ACK safe to retry.
                 stable = 0
                 while time.time() < entry["deadline"]:
@@ -210,6 +292,10 @@ class FleetUpdates:
                         if self.cancelled(plan):
                             return
                         job = status.get("job")
+                        phase = ("reconnecting" if job["state"] == "complete" else job["state"]) if job else "waiting"
+                        if entry.get("phase") != phase:
+                            entry["phase"] = phase
+                            self.save("update_plans", plan)
                         if job and job["state"] == "failed":
                             raise ValueError(f"{node}: {job['error']}")
                         if job and job["state"] == "complete" and Version(status["version"]) != Version(plan["version"]):
@@ -231,10 +317,15 @@ class FleetUpdates:
                         stable = stable + 1 if ready else 0
                         if stable >= 2:
                             entry["state"] = "complete"
+                            entry["phase"] = "complete"
+                            await self.maintenance(plan, entry, finish=True)
                             self.save("update_plans", plan)
                             break
                     else:
                         stable = 0
+                        if entry.get("phase") != "reconnecting":
+                            entry["phase"] = "reconnecting"
+                            self.save("update_plans", plan)
                     await asyncio.sleep(5)
                 else:
                     raise ValueError(f"{node} did not confirm a healthy restart within 30 minutes; rollout stopped")
@@ -244,5 +335,7 @@ class FleetUpdates:
             logging.exception("Rolling update %s stopped", plan["id"])
             if self.cancelled(plan):
                 return
+            if plan["nodes"]:
+                entry["phase"] = "failed"
             plan.update(state="failed", error=str(exc)[:500])
             self.save("update_plans", plan)

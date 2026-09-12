@@ -42,6 +42,51 @@ def test_job_acceptance_is_durable_and_idempotent(tmp_path):
     asyncio.run(run())
 
 
+def test_progress_message_is_reused_after_plan_saves():
+    async def run():
+        f = await fleet()
+        message = SimpleNamespace(edit=AsyncMock())
+        channel = SimpleNamespace(id=456, get_partial_message=Mock(return_value=message))
+        f.bot.get_channel = Mock(return_value=channel)
+        f.bot.http = SimpleNamespace(request=AsyncMock(return_value={"id": "789"}))
+        plan = dict(id="a"*32, version="1.1.0", state="running", channel=456, nodes=[dict(node="b", state="pending")])
+        f.save("update_plans", plan)
+        await f.publish(plan["id"])
+        plan["nodes"][0]["phase"] = "installing"
+        f.save("update_plans", plan)
+        await f.publish(plan["id"])
+        assert f.rows("update_plans")[0]["message"] == 789
+        f.bot.http.request.assert_awaited_once()
+        assert "installing" in message.edit.call_args.kwargs["content"]
+        f.db.close()
+    asyncio.run(run())
+
+
+def test_update_maintenance_has_deadline_and_preserves_manual_override():
+    async def run():
+        f = await fleet()
+        values = {}
+        def append(kind, value):
+            assert kind == "setting"
+            values[value["subject"]] = value
+        f.mesh.monitor = SimpleNamespace(store=SimpleNamespace(
+            setting=lambda guild, subject: values.get(subject), append=append))
+        plan = dict(id="a"*32)
+        entry = dict(node="b", deadline=module.time.time()+1800)
+        await f.maintenance(plan, entry)
+        assert values["b"]["maintenance_until"] == entry["deadline"]
+        assert values["b"]["maintenance_reason"] == "Rolling update " + plan["id"]
+        await f.maintenance(plan, entry, finish=True)
+        assert values["b"]["maintenance_until"] == 0
+        values["b"].update(maintenance_reason="Hardware work", maintenance_until=module.time.time()+3600)
+        await f.maintenance(plan, entry)
+        await f.maintenance(plan, entry, finish=True)
+        assert values["b"]["maintenance_reason"] == "Hardware work"
+        assert values["b"]["maintenance_until"] > entry["deadline"]
+        f.db.close()
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("requested", ["0.9.0", "1.0.0"])
 def test_reinstall_and_downgrade_are_rejected(requested):
     async def run():
@@ -158,10 +203,10 @@ def test_member_picker_schema_and_admin_confirmed_target():
         view = UpdatePromptView(bot.get_cog("UpdateCog"), SimpleNamespace(version="1.1.0"), source="fleet", server="b")
         user = Mock(spec=discord.Member)
         user.roles, user.id = [SimpleNamespace(name="Admin")], 55
-        interaction = SimpleNamespace(client=bot, guild=object(), user=user,
+        interaction = SimpleNamespace(client=bot, guild=object(), user=user, channel_id=123,
             response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
         await view.children[0].callback(interaction)
-        bot.fleet_updates.begin.assert_awaited_once_with("b", "1.1.0", 55)
+        bot.fleet_updates.begin.assert_awaited_once_with("b", "1.1.0", 55, channel_id=123)
         await bot.close()
     asyncio.run(run())
 
