@@ -5,6 +5,8 @@
 Mitra is a modular Discord bot package for home/server operations.  
 It monitors public IP changes, supports UPS status/graphing, and provides admin-only power controls.
 
+[Terms of Service](TERMS_OF_SERVICE.md) · [Privacy Policy](PRIVACY_POLICY.md) · [GPL-3.0 License](LICENSE)
+
 ## Guided setup
 
 On Windows, extract the deployment ZIP and double-click **Setup-MitraBot.cmd**.
