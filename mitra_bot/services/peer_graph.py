@@ -13,9 +13,10 @@ from matplotlib.figure import Figure
 import matplotlib.dates as mdates
 from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
+from mitra_bot.services.graph_theme import FIG_BG, AX_BG, TEXT, GRID, ACCENT, style_axis
 
 _LOCK = threading.Lock()
-UP, DOWN, UNKNOWN = "#2da778", "#df5b62", "#dce1e8"
+UP, DOWN, UNKNOWN = "#2da778", "#df5b62", "#6D6F78"
 
 
 def metrics(rows, start, end):
@@ -67,6 +68,7 @@ def render_history(series, observer, start, end, *, detail=False, restarts=()):
         width = max(300, math.ceil((end-start)/720/300)*300)
         series = {node:_compact(rows,width) for node,rows in series.items()}
         figure = Figure(figsize=(11, 6 if detail else max(3, 1.5+len(series)*.65)), layout="constrained")
+        figure.set_facecolor(FIG_BG)
         FigureCanvasAgg(figure)
         if detail:
             subject, rows = next(iter(series.items()))
@@ -85,7 +87,7 @@ def render_history(series, observer, start, end, *, detail=False, restarts=()):
                 row = by_bucket.get(ts)
                 x.append(_date(ts+width/2))
                 y.append(row["rtt"] if row and row["rtt"] is not None else float("nan"))
-            axes[2].plot(x, y, color="#487ec2", linewidth=1.3)
+            axes[2].plot(x, y, color=ACCENT, linewidth=2.2, alpha=.95)
             axes[2].set_ylabel("Mean RTT (ms)")
             axes[2].set_ylim(bottom=0)
             for ts in restarts:
@@ -102,7 +104,10 @@ def render_history(series, observer, start, end, *, detail=False, restarts=()):
             figure.suptitle(f"Server availability — observed by {observer}", fontsize=15)
         for ax in axes:
             ax.set_xlim(_date(start), _date(end))
-            ax.grid(axis="x", alpha=.2)
+            style_axis(ax, grid_axis="x")
+        figure._suptitle.set_color(TEXT)
+        figure._suptitle.set_fontsize(14)
+        figure._suptitle.set_fontweight("bold")
         locator = mdates.AutoDateLocator(minticks=3, maxticks=8)
         axes[-1].xaxis.set_major_locator(locator)
         axes[-1].xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator, tz=timezone.utc))
@@ -111,8 +116,9 @@ def render_history(series, observer, start, end, *, detail=False, restarts=()):
                   Patch(color=DOWN, label="Failed probe / disconnected"), Patch(color=UNKNOWN, label="Unknown")]
         if detail and restarts:
             legend.append(Line2D([0],[0], color="#8859b6", linestyle=":", label="Process restarted"))
-        axes[0].legend(handles=legend, loc="upper center", bbox_to_anchor=(.5, 1.5 if detail else 1.10), ncol=4, fontsize=8)
+        axes[0].legend(handles=legend, loc="upper center", bbox_to_anchor=(.5, 1.5 if detail else 1.10), ncol=4, fontsize=8,
+                       facecolor=AX_BG, edgecolor=GRID, labelcolor=TEXT, framealpha=1)
         output = BytesIO()
-        figure.savefig(output, format="png", dpi=120)
+        figure.savefig(output, format="png", dpi=220, facecolor=FIG_BG)
         output.seek(0)
         return output
