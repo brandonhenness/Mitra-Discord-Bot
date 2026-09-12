@@ -146,10 +146,30 @@ class ConfigStateTests(unittest.TestCase):
         first_read_started = threading.Event()
         allow_first_write = threading.Event()
         second_read_started = threading.Event()
+        second_lock_attempted = threading.Event()
+        second_lock_acquired: list[bool] = []
         call_count = 0
         call_count_lock = threading.Lock()
         errors: list[BaseException] = []
         original_read = storage_store.read_storage_with_defaults
+        original_lock = storage_store._STORAGE_LOCK
+
+        class ObservedLock:
+            """Observe real lock contention without a scheduling-time guess."""
+            def __enter__(self):
+                if (threading.current_thread() is notification_thread
+                        and not second_lock_attempted.is_set()):
+                    acquired = original_lock.acquire(blocking=False)
+                    second_lock_acquired.append(acquired)
+                    second_lock_attempted.set()
+                    if acquired:
+                        return self
+                if not original_lock.acquire(timeout=15):
+                    raise TimeoutError("storage worker could not acquire the lock")
+                return self
+
+            def __exit__(self, *_):
+                original_lock.release()
 
         def delayed_read() -> dict:
             nonlocal call_count
@@ -159,7 +179,7 @@ class ConfigStateTests(unittest.TestCase):
                 current_call = call_count
             if current_call == 1:
                 first_read_started.set()
-                if not allow_first_write.wait(timeout=2):
+                if not allow_first_write.wait(timeout=45):
                     raise TimeoutError("test did not release the first storage write")
             else:
                 second_read_started.set()
@@ -171,7 +191,7 @@ class ConfigStateTests(unittest.TestCase):
             except BaseException as exc:  # pragma: no cover - asserted below
                 errors.append(exc)
 
-        with patch(
+        with patch.object(storage_store, "_STORAGE_LOCK", ObservedLock()), patch(
             "mitra_bot.storage.storage_store.read_storage_with_defaults",
             side_effect=delayed_read,
         ):
@@ -183,15 +203,18 @@ class ConfigStateTests(unittest.TestCase):
                 target=capture_errors,
                 args=(set_notification_channel_id_for_guild, 42, 99),
             )
-            updater_thread.start()
-            self.assertTrue(first_read_started.wait(timeout=1))
-            notification_thread.start()
             try:
-                self.assertFalse(second_read_started.wait(timeout=0.1))
+                updater_thread.start()
+                self.assertTrue(first_read_started.wait(timeout=15), repr(errors))
+                notification_thread.start()
+                self.assertTrue(second_lock_attempted.wait(timeout=15), repr(errors))
+                self.assertEqual(second_lock_acquired, [False])
+                self.assertFalse(second_read_started.is_set())
             finally:
                 allow_first_write.set()
-                updater_thread.join(timeout=2)
-                notification_thread.join(timeout=2)
+                for worker in (updater_thread, notification_thread):
+                    if worker.ident is not None:
+                        worker.join(timeout=15)
 
         self.assertFalse(updater_thread.is_alive())
         self.assertFalse(notification_thread.is_alive())
