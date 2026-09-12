@@ -147,3 +147,38 @@ Tests use real local mutual TLS and mocked Discord/OS calls. Before production,
 run a controlled two-machine Discord acceptance test: event delivery to both
 sessions, one response per interaction, confirmation after origin failure, and
 monitoring/power access with the other node off. These live checks are not yet run.
+
+## Repairing an early-beta CA certificate
+
+Some OpenSSL installations added their default CA extensions alongside Mitra's
+requested extensions. The resulting duplicate Basic Constraints made the CA invalid:
+TCP connections worked, but TLS failed with `CERTIFICATE_VERIFY_FAILED` and peers
+appeared unreachable. Provisioning now uses an explicit configuration and verifies
+the CA and every node certificate before completing.
+
+For an affected existing network, use the original provisioning machine with its
+`peer-bundles/ca.crt`, `peer-bundles/OFFLINE-CA.key` and node bundle folders. After
+updating the software to a version containing the repair utility, run:
+
+```powershell
+uv run --no-sync python -m mitra_bot.repair_peer_ca --bundle-root peer-bundles --output repaired-ca.crt
+```
+
+The utility writes a new public certificate only after validating every existing
+node against it. It preserves the CA's public key, subject, serial and validity
+dates. It refuses to overwrite files or proceed with a mismatched offline key.
+
+After successful verification:
+
+1. Stop every bot in this private network.
+2. Back up each installation's existing `ca.crt`, then copy `repaired-ca.crt` to
+   that installation as `ca.crt` (or the path configured by `ca_file`). Give all
+   peers the same repaired certificate.
+3. Back up and replace the CA certificate in the original provisioning folder
+   and each saved node bundle too, so future installations use the repaired CA.
+4. Restart the bots and run `/servers list` and `/servers doctor`.
+
+Keep existing `node.crt`, `node.key`, peer configuration and databases. Do not
+transfer `OFFLINE-CA.key` to other machines; only the repaired public certificate
+needs to be distributed. If the offline key is unavailable, this repair cannot
+preserve the existing certificates: a replacement network must be provisioned.

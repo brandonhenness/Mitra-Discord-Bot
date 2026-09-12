@@ -14,6 +14,19 @@ import tomli_w
 from mitra_bot.peer_config import Peer, PeerConfig
 
 
+OPENSSL_CONFIG = """[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = Mitra Private Network CA
+[ca]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
+"""
+
+
 def find_openssl() -> str:
     executable = shutil.which("openssl")
     if executable:
@@ -39,22 +52,26 @@ def provision(output: Path, nodes: dict[str, str], *, allow_power: bool = False)
 
     ca_key = output / "OFFLINE-CA.key"
     ca_cert = output / "ca.crt"
+    config = output / "openssl.cnf"
+    config.write_text(OPENSSL_CONFIG, encoding="ascii")
     run("req", "-x509", "-newkey", "rsa:3072", "-nodes", "-days", "3650",
         "-keyout", ca_key, "-out", ca_cert, "-subj", "/CN=Mitra Private Network CA",
-        "-addext", "basicConstraints=critical,CA:TRUE",
-        "-addext", "keyUsage=critical,keyCertSign,cRLSign")
+        "-config", config, "-extensions", "ca")
+    run("verify", "-check_ss_sig", "-CAfile", ca_cert, ca_cert)
     fingerprints = {}
     for node in nodes:
         folder = output / node
         folder.mkdir()
         shutil.copyfile(ca_cert, folder / "ca.crt")
         run("req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", folder / "node.key",
-            "-out", folder / "node.csr", "-subj", f"/CN={node}")
+            "-out", folder / "node.csr", "-subj", f"/CN={node}", "-config", config)
         extensions = folder / "extensions.cnf"
         extensions.write_text("basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth,clientAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n", encoding="ascii")
         run("x509", "-req", "-in", folder / "node.csr", "-CA", ca_cert, "-CAkey", ca_key,
             "-set_serial", str(uuid.uuid4().int), "-days", "365", "-out", folder / "node.crt",
             "-extfile", extensions)
+        run("verify", "-purpose", "sslserver", "-CAfile", ca_cert, folder / "node.crt")
+        run("verify", "-purpose", "sslclient", "-CAfile", ca_cert, folder / "node.crt")
         certificate = ssl.PEM_cert_to_DER_cert((folder / "node.crt").read_text())
         fingerprints[node] = hashlib.sha256(certificate).hexdigest()
     network_id = uuid.uuid4().hex

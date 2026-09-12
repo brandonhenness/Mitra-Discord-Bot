@@ -197,6 +197,8 @@ cython_debug/
 
 # Private mesh credentials and per-node telemetry / request journals
 peer-network.toml
+/ca.crt
+/node.crt
 peer-state.db*
 peer-bundles/
 *.key
