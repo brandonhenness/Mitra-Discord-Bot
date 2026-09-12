@@ -285,13 +285,17 @@ def _install_requirements() -> None:
     if pyproject.exists():
         uv = shutil.which("uv")
         if uv:
-            cmd = [uv, "sync", "--no-dev", "--frozen", "--no-install-project"]
+            # Excluding the project from an exact sync also uninstalls its
+            # existing launcher, which Windows may have locked. Keep the
+            # project installed while updating its locked dependencies.
+            cmd = [uv, "sync", "--no-dev", "--frozen", "--no-install-project", "--inexact"]
             subprocess.run(
                 cmd,
                 cwd=PROJECT_ROOT,
                 check=True,
                 text=True,
                 capture_output=True,
+                env={**os.environ, "UV_PROJECT_ENVIRONMENT": sys.prefix},
             )
             return
 
@@ -418,6 +422,11 @@ def _install_release(release: ReleaseInfo) -> InstallResult:
                 "last_notified_version": release.version,
             }
         )
+        try:
+            from mitra_bot.services.update_recovery import prune_successful_backups
+            prune_successful_backups(PROJECT_ROOT)
+        except OSError:
+            logging.warning("Old successful update backups could not be pruned", exc_info=True)
         return InstallResult(ok=True, version=release.version)
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()

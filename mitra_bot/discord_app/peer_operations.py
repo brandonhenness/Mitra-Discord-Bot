@@ -69,7 +69,7 @@ class SharedDashboard:
             raise ValueError("Dashboard guild mismatch")
         message = await channel.fetch_message(setting["message_id"])
         marker = dashboard_marker(self.mesh, setting["guild"])
-        if message.author.id != self.bot.user.id or not any((e.footer.text or "").startswith(marker) for e in message.embeds):
+        if message.author.id != self.bot.user.id or not any((getattr(e.footer, "text", None) or "").startswith(marker) for e in message.embeds):
             raise ValueError("Configured message is not this network's dashboard")
         rank = sorted([self.mesh.config.node_id, *self.mesh.peers]).index(self.mesh.config.node_id)
         threshold = setting["dashboard_interval"] + rank*15
@@ -98,10 +98,10 @@ async def find_dashboard(channel, bot, marker):
         messages = [message async for message in pins]
     for message in messages:
         message = getattr(message,"message",message)
-        if message.author.id == bot.user.id and any((e.footer.text or "").startswith(marker) for e in message.embeds):
+        if message.author.id == bot.user.id and any((getattr(e.footer, "text", None) or "").startswith(marker) for e in message.embeds):
             return message
     async for message in channel.history(limit=100):
-        if message.author.id == bot.user.id and any((e.footer.text or "").startswith(marker) for e in message.embeds):
+        if message.author.id == bot.user.id and any((getattr(e.footer, "text", None) or "").startswith(marker) for e in message.embeds):
             return message
     return None
 
@@ -111,6 +111,13 @@ async def doctor(mesh, bot, guild):
     lines = [f"Instance: `{mesh.config.node_id}` · state owner: `{mesh.config.resolved_state_owner}`",
              f"Discord: {'connected' if bot.is_ready() and bot.gateway_connected else 'disconnected'}"]
     tasks = mesh.monitor.tasks
+    owner = mesh.config.resolved_state_owner
+    owner_connected = bool(bot.is_ready() and bot.gateway_connected) if owner == mesh.config.node_id else bool(mesh.online.get(owner))
+    lines.append(f"State owner: {'available (latest local view)' if owner_connected else 'unavailable or not yet observed'}. "
+                 "Rolling updates, UPS configuration, channel settings and ToDo writes require this owner. "
+                 "Monitoring, shared alerts, IP/about reads and targeted power/UPS status can use surviving nodes.")
+    lines.append("Application state is not automatically replicated or promoted. Restore the same owner identity from backup; "
+                 "never run two copies of that identity. See docs/operations-recovery.md.")
     lines.append(f"Monitoring tasks running: {sum(not task.done() for task in tasks)}/{len(tasks)}")
     for label, filename in (("Node certificate", mesh.config.cert_file), ("CA certificate", mesh.config.ca_file)):
         try:
@@ -163,9 +170,13 @@ async def doctor(mesh, bot, guild):
             channel = bot.get_channel(setting["channel"]) or await bot.fetch_channel(setting["channel"])
             permissions = verify_channel(channel,guild)
             lines.append(f"Alert channel: {channel.mention} · required permissions OK")
+            seen_roles = set()
             for value in store.settings():
                 if value["guild"] != guild.id or not value.get("role"):
                     continue
+                if value["role"] in seen_roles:
+                    continue
+                seen_roles.add(value["role"])
                 role = guild.get_role(value["role"])
                 if role is None:
                     state = "role missing; reconfigure /servers alerts"

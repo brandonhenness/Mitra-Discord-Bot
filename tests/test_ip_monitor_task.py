@@ -412,6 +412,7 @@ class CloudflareIPUpdateTests(unittest.IsolatedAsyncioTestCase):
 class IPCogNotificationTests(unittest.IsolatedAsyncioTestCase):
     async def test_status_fetches_public_ip_off_event_loop(self) -> None:
         bot = Mock()
+        bot.peer_service = None
         cog = IPCog(bot)
         ctx = Mock()
         ctx.defer = AsyncMock()
@@ -424,10 +425,10 @@ class IPCogNotificationTests(unittest.IsolatedAsyncioTestCase):
             return "5.6.7.8"
 
         with patch(
-            "mitra_bot.discord_app.cogs.ip_cog.get_public_ip",
+            "mitra_bot.discord_app.node_commands.get_public_ip",
             side_effect=fake_get_public_ip,
         ):
-            await IPCog.status.callback(cog, ctx)
+            await IPCog.status.callback(cog, ctx, None)
 
         ctx.defer.assert_awaited_once_with(ephemeral=True)
         ctx.respond.assert_awaited_once()

@@ -1,7 +1,7 @@
 [bot]
 ip_poll_seconds = 900
 admin_role_name = "Mitra Admin"
-ip_subscriber_role_name = "Mitra IP Subscriber"
+ip_subscriber_role_name = "Mitra Alerts"
 
 [ups]
 enabled = true

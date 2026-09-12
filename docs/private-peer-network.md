@@ -125,8 +125,8 @@ Existing To-Do, notification-setting, updater, IP command and UPS-setting comman
 remain assigned to `state_owner`. To-Do listeners and periodic update notifications
 also run there. Their databases are not replicated. Other nodes report that the
 owner did not accept a stateful command instead of modifying a different database.
-Monitoring/power commands continue without that owner. `/update` updates that
-owner; update other installations with the existing local update procedure.
+Monitoring/power commands continue without that owner. `/update` is coordinated by that owner and can update one node or all nodes
+sequentially. See [rolling updates and bootstrap](releases.md#rolling-peer-updates).
 
 ## Membership and validation
 
@@ -147,3 +147,72 @@ Tests use real local mutual TLS and mocked Discord/OS calls. Before production,
 run a controlled two-machine Discord acceptance test: event delivery to both
 sessions, one response per interaction, confirmation after origin failure, and
 monitoring/power access with the other node off. These live checks are not yet run.
+
+## Node-aware commands and dashboard controls
+
+For persistent update progress, planned-update maintenance, membership changes,
+backup/restore, owner recovery and the live beta test checklist, see
+[Operations and recovery](operations-recovery.md).
+
+- `/ip status` shows every node's current public IP. Use `server:test` to query
+  one node, or `server:all` for the network. Unavailable results are labeled;
+  another node's IP is never substituted.
+- `/about` shows each node's version, runtime, process uptime and Discord
+  connection. Its optional `server` argument also accepts a node ID or `all`.
+  "Discord servers" counts guilds, not peer machines.
+- `/ups monitoring enabled:false server:test` changes only that node's UPS
+  monitoring. `/ups timezone tz:America/Los_Angeles server:test` changes only
+  that node's graph timezone. Both require the Mitra admin role. Omitting
+  `server` retains the configured state owner as the target; bulk changes are
+  not accepted. The state owner authorizes and forwards remote settings over
+  authenticated TLS and must be available to handle these commands.
+- Standalone installations support `local`; IP and about also accept `all`.
+
+Every target needs software supporting these commands. An older peer may still
+be reachable for health checks while rejecting a new operation. Update the peer
+before retrying. If a setting response is lost, inspect the selected node before
+retrying; the change may already have been saved there.
+
+The dashboard's **Show** selector chooses the machine or all machines being
+graphed. **Monitoring perspective** reveals the optional **Measured from**
+selector, which chooses whose observations to display. For example, Show: test
+and Measured from: mitra describes the primary's ability to reach test. The
+observer remains displayed in the dashboard even when the selector is hidden.
+Time-range and refresh controls retain that perspective. Missing measurements
+remain unknown coverage, rather than being counted as an outage. Controls open
+a private refreshed dashboard without changing the shared pinned dashboard.
+
+## Repairing an early-beta CA certificate
+
+Some OpenSSL installations added their default CA extensions alongside Mitra's
+requested extensions. The resulting duplicate Basic Constraints made the CA invalid:
+TCP connections worked, but TLS failed with `CERTIFICATE_VERIFY_FAILED` and peers
+appeared unreachable. Provisioning now uses an explicit configuration and verifies
+the CA and every node certificate before completing.
+
+For an affected existing network, use the original provisioning machine with its
+`peer-bundles/ca.crt`, `peer-bundles/OFFLINE-CA.key` and node bundle folders. After
+updating the software to a version containing the repair utility, run:
+
+```powershell
+uv run --no-sync python -m mitra_bot.repair_peer_ca --bundle-root peer-bundles --output repaired-ca.crt
+```
+
+The utility writes a new public certificate only after validating every existing
+node against it. It preserves the CA's public key, subject, serial and validity
+dates. It refuses to overwrite files or proceed with a mismatched offline key.
+
+After successful verification:
+
+1. Stop every bot in this private network.
+2. Back up each installation's existing `ca.crt`, then copy `repaired-ca.crt` to
+   that installation as `ca.crt` (or the path configured by `ca_file`). Give all
+   peers the same repaired certificate.
+3. Back up and replace the CA certificate in the original provisioning folder
+   and each saved node bundle too, so future installations use the repaired CA.
+4. Restart the bots and run `/servers list` and `/servers doctor`.
+
+Keep existing `node.crt`, `node.key`, peer configuration and databases. Do not
+transfer `OFFLINE-CA.key` to other machines; only the repaired public certificate
+needs to be distributed. If the offline key is unavailable, this repair cannot
+preserve the existing certificates: a replacement network must be provisioned.

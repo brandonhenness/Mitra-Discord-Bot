@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import discord
+from mitra_bot.discord_app.command_errors import report_command_error
 from mitra_bot.discord_app.bot_factory import AppState, create_bot
 from mitra_bot.logging_setup import setup_logging
 from mitra_bot.storage.storage_schema import RestartNoticeRuntimeModel
@@ -21,6 +22,7 @@ from mitra_bot.peer_config import load_peer_config
 from mitra_bot.services.peer_service import PeerService
 from mitra_bot.services.power_service import execute_power_action
 from mitra_bot.services.role_manager import ensure_role
+from mitra_bot.services.alert_roles import shared_role
 from mitra_bot.tasks.ip_monitor_task import IPMonitorTask
 from mitra_bot.tasks.update_monitor_task import UpdateMonitorTask
 from mitra_bot.tasks.ups_monitor_task import UPSMonitorTask
@@ -61,6 +63,8 @@ async def main_async() -> None:
             power=peer_power,
         )
         bot.peer_service = peer_service
+        from mitra_bot.discord_app.node_commands import local_operation
+        peer_service.node_rpc = lambda operation, payload: local_operation(bot, operation, payload)
         peer_service.configure_discord_identity(settings.token)
         peer_service.health_provider = lambda: {"discord_connected": bot.gateway_connected}
         bot.auto_sync_commands = peer_service.is_state_owner
@@ -72,7 +76,7 @@ async def main_async() -> None:
             if notification.channel_id:
                 channel = bot.get_channel(notification.channel_id) or await bot.fetch_channel(notification.channel_id)
                 if notification.mention_ip_subscribers and getattr(channel, "guild", None):
-                    role = discord.utils.get(channel.guild.roles, name=settings.ip_subscriber_role_name)
+                    role = shared_role(channel.guild) or discord.utils.get(channel.guild.roles, name=settings.ip_subscriber_role_name)
                     if role:
                         if not role.mentionable:
                             await role.edit(mentionable=True, reason="Mitra IP change notification")
@@ -180,16 +184,7 @@ async def main_async() -> None:
     async def on_application_command_error(
         ctx: discord.ApplicationContext, error: Exception
     ) -> None:
-        command_name = _command_name(ctx)
-        guild_id, channel_id, user_id = _ctx_scope(ctx)
-        logging.exception(
-            "Command error: /%s guild_id=%s channel_id=%s user_id=%s err=%s",
-            command_name,
-            guild_id,
-            channel_id,
-            user_id,
-            error,
-        )
+        await report_command_error(ctx, error)
 
     @bot.event
     async def on_disconnect():
@@ -220,7 +215,6 @@ async def main_async() -> None:
         if bot.owns_application_state:
             for guild in bot.guilds:
                 await ensure_role(guild, settings.admin_role_name)
-                await ensure_role(guild, settings.ip_subscriber_role_name)
 
         logging.info(
             "Starting tasks: ip_monitor=%ss ups_monitor=%ss update_monitor=%ss",
@@ -334,6 +328,10 @@ async def main_async() -> None:
     try:
         if peer_service:
             await peer_service.start()
+            from mitra_bot.services.fleet_updates import FleetUpdates
+            bot.fleet_updates = FleetUpdates(bot, peer_service)
+            await bot.fleet_updates.start()
+            peer_service.update_rpc = bot.fleet_updates.rpc
             # Hardware monitoring starts even before this node's Discord login.
             await ip_task.start()
             await ups_task.start()
@@ -351,6 +349,8 @@ async def main_async() -> None:
         for monitor in (ip_task, ups_task, update_task):
             monitor.loop.cancel()
         if peer_service:
+            if getattr(bot, "fleet_updates", None):
+                await bot.fleet_updates.close()
             await peer_service.close()
         await bot.close()
 

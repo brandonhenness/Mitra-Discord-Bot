@@ -1,16 +1,15 @@
 # mitra_bot/discord_app/cogs/ip_cog.py
-from __future__ import annotations
 
-import asyncio
 import logging
 
 import discord
 from discord.ext import commands
 
-from mitra_bot.services.ip_service import get_public_ip
 from mitra_bot.services.notifier import Notifier
 from mitra_bot.services.peer_service import Notification
-from mitra_bot.services.role_manager import ensure_role
+from mitra_bot.services.alert_roles import shared_role, subscription
+from mitra_bot.discord_app.node_commands import selected_nodes, read_nodes
+from mitra_bot.services.peer_service import PeerError
 from mitra_bot.storage.storage_store import (
     get_notification_channel_id_for_guild,
     get_notification_channel_map,
@@ -32,53 +31,28 @@ class IPCog(commands.Cog):
     )
 
     @ip.command(name="status", description="Show current public IP")
-    async def status(self, ctx: discord.ApplicationContext):
+    async def status(self, ctx: discord.ApplicationContext,
+                     server: str = discord.Option(str, description="Server ID or all (default: all servers)", required=False, default=None)):
         await ctx.defer(ephemeral=True)
-
-        ip = await asyncio.to_thread(get_public_ip)
-        if not ip:
-            await ctx.respond("Failed to fetch public IP.", ephemeral=True)
+        try:
+            nodes = selected_nodes(self.bot, server, default_all=True)
+        except PeerError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
             return
+        results = await read_nodes(self.bot, nodes, "public_ip")
+        lines = [f"**{node}**: " + (f"`{data['ip']}`" if data and data.get("ip") else
+                 "Unavailable: " + (data.get("error", "Public-IP lookup failed.") if data else "Public-IP lookup failed.")) for node, data in results]
+        for start in range(0, len(lines), 8):
+            await ctx.respond("\n".join(lines[start:start+8]), ephemeral=True,
+                              allowed_mentions=discord.AllowedMentions.none())
 
-        await ctx.respond(_format_ip_message(ip, is_change=False), ephemeral=True)
-
-    @ip.command(
-        name="subscribe", description="Subscribe to IP change alerts (adds a role)"
-    )
+    @ip.command(name="subscribe", description="Subscribe to all Mitra alerts, including IP changes")
     async def subscribe(self, ctx: discord.ApplicationContext):
-        if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-            await ctx.respond(
-                "This command can only be used in a server.", ephemeral=True
-            )
-            return
+        await subscription(ctx, True)
 
-        role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
-        role = await ensure_role(ctx.guild, role_name)
-
-        await ctx.author.add_roles(role, reason="User subscribed to IP alerts")
-        await ctx.respond(f"Subscribed. Added role: **{role.name}**", ephemeral=True)
-
-    @ip.command(
-        name="unsubscribe", description="Unsubscribe from IP alerts (removes a role)"
-    )
+    @ip.command(name="unsubscribe", description="Unsubscribe from all Mitra operational alerts")
     async def unsubscribe(self, ctx: discord.ApplicationContext):
-        if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-            await ctx.respond(
-                "This command can only be used in a server.", ephemeral=True
-            )
-            return
-
-        role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
-        role = discord.utils.get(ctx.guild.roles, name=role_name)
-
-        if not role:
-            await ctx.respond("Subscriber role does not exist.", ephemeral=True)
-            return
-
-        await ctx.author.remove_roles(role, reason="User unsubscribed from IP alerts")
-        await ctx.respond(
-            f"Unsubscribed. Removed role: **{role.name}**", ephemeral=True
-        )
+        await subscription(ctx, False)
 
     async def notify_ip_change(self, new_ip: str) -> bool:
         """
@@ -99,8 +73,14 @@ class IPCog(commands.Cog):
         # Every active instance reports its own IP events using local destinations.
         mesh = getattr(self.bot, "peer_service", None)
         if mesh is not None:
-            channels = set(get_notification_channel_map().values())
-            if not channels and self.bot.state.channel_id:
+            destinations = dict(get_notification_channel_map())
+            for setting in mesh.monitor.store.settings():
+                if setting["subject"] == "*" and setting.get("role"):
+                    destinations.pop(setting["guild"], None)
+                    if setting["enabled"] and setting.get("channel"):
+                        destinations[setting["guild"]] = setting["channel"]
+            channels = set(destinations.values())
+            if not destinations and not any(s["subject"] == "*" for s in mesh.monitor.store.settings()) and self.bot.state.channel_id:
                 channels.add(self.bot.state.channel_id)
             results = [await mesh.notify(Notification(channel_id=int(channel_id), message=msg_body,
                                                        mention_ip_subscribers=True)) for channel_id in channels]
@@ -115,7 +95,7 @@ class IPCog(commands.Cog):
             configured += 1
 
             role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
-            role = discord.utils.get(guild.roles, name=role_name)
+            role = shared_role(guild) or discord.utils.get(guild.roles, name=role_name)
             mention_prefix = ""
             if role:
                 # Ensure it is mentionable (safe even if already true)
@@ -160,7 +140,7 @@ class IPCog(commands.Cog):
         mention_prefix = ""
         for guild in self.bot.guilds:
             role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
-            role = discord.utils.get(guild.roles, name=role_name)
+            role = shared_role(guild) or discord.utils.get(guild.roles, name=role_name)
             if role:
                 if not role.mentionable:
                     try:

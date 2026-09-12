@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import builtins
 import os
+import getpass
 from contextlib import contextmanager
 from functools import wraps
 
@@ -48,8 +49,25 @@ def ask(prompt):
     display = console()
     if not interactive(display):
         return builtins.input(prompt)
-    display.print(Text("  ? "+prompt, style="bold cyan"), end="")
+    question(prompt, display=display)
+    display.print(Text("  Answer > ", style="bold yellow"), end="")
     return builtins.input("")
+
+
+def question(prompt, *, display=None):
+    display = display or console()
+    display.print()
+    display.print(Panel(Text(prompt, style="bold white"), title=Text("Your choice", style="bold yellow"),
+                        title_align="left", border_style="yellow", padding=(0, 1), expand=False))
+
+
+def secret(prompt):
+    display = console()
+    if not interactive(display):
+        return getpass.getpass(prompt)
+    question(prompt, display=display)
+    display.print(Text("  Input is hidden. Paste, then press Enter.", style="dim"))
+    return getpass.getpass("  Hidden input > ")
 
 
 def choices(labels):
@@ -74,14 +92,19 @@ def banner(title, subtitle):
     display.print(Panel(body, border_style="cyan", padding=(1, 2), expand=False))
 
 
-def step(title, number=None, total=None):
+def step(title, number=None, total=None, *, purpose=None):
     label = f"{number}/{total}  {title}" if number is not None else title
     display = console()
     if not interactive(display):
         message("\n"+label)
+        if purpose:
+            message("Purpose: " + purpose)
         return
     display.print()
     display.rule(Text(label, style="bold cyan"), align="left", style="bright_black")
+    if purpose:
+        display.print(Text("  " + purpose, style="italic"))
+    display.print()
 
 
 @contextmanager

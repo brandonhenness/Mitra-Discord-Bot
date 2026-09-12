@@ -7,38 +7,44 @@ See [private network setup](private-peer-network.md) for certificates and member
 
 ## Enable subscriber notifications
 
-1. As a configured Mitra administrator, run
-   `/servers alerts channel:#server-alerts server:server-a`.
-2. Repeat for `server-b` and any additional server. The channel setting is per guild;
-   the most recent channel choice applies to that guild's server alerts.
-3. Members run `/servers subscribe server:server-a` for each desired subscription.
-   `/servers unsubscribe server:server-a` removes only the invoking member's role.
-4. Use `enabled:false` on `/servers alerts` to disable that guild's notifications.
+Mitra uses one permissionless **Mitra Alerts** role per Discord guild for IP
+changes, every node's outage/recovery alerts, and automatic update announcements.
 
-Setup creates a distinct, mentionable role for the selected server, or accepts an
-explicit existing role. The bot needs Manage Roles and a higher role than subscriber
-roles. Subscriber roles must have no global permissions or channel permission grants,
-must not be managed integration roles, and must not be Mitra's administrator role.
-These checks run again when a member subscribes. Duplicate role names from concurrent
-setup are surfaced for an administrator to reconcile; memberships are not moved
-or roles deleted automatically. Review memberships before explicitly switching an
-existing subscription to a different role.
+1. As a Mitra administrator, run `/alerts setup channel:#mitra` once per guild.
+   `/servers alerts channel:#mitra` is the peer-network alias.
+2. Members run `/alerts subscribe` or `/alerts unsubscribe` for all alerts.
+   `/ip subscribe`, `/ip unsubscribe`, `/servers subscribe`, and
+   `/servers unsubscribe` are aliases; server selection is no longer needed.
+   Mitra administrators may supply `user:` on `/alerts subscribe` or
+   `/alerts unsubscribe` to manage another member, for example
+   `/alerts subscribe user:@Alex`. Supplying `user:` always requires the configured
+   Mitra admin role; omitting it keeps self-service available to everyone.
+   The selected member must belong to this guild. Confirmations are private and
+   do not ping the member; role audit reasons identify the administrator.
+3. Use `/servers alerts-test server:test mention:true` to check delivery.
+   Server selection here identifies the simulated event, not a subscription group.
 
-The alert channel requires View Channel, Send Messages, Embed Links, and Read Message
-History. A pre-existing subscriber role must be mentionable unless the bot has
-Mention Everyone. Messages explicitly allow only the selected role mention, never
-`@everyone`, arbitrary users, or other roles. Discord members' own notification
-settings still govern push notifications. Members also need access to the alert channel.
+Setup copies members of configured old IP and per-node subscriber roles into
+Mitra Alerts, then removes their old subscription memberships. Old roles are left
+empty for administrator review/deletion. A failed assignment preserves the old
+membership; rerun setup to finish migration. The bot fetches the full member list
+and needs Server Members Intent plus Manage Roles. It refuses privileged or
+unmanageable subscription roles and duplicate shared role names. Place the bot's
+role above the subscription roles. Existing channels and role settings remain
+usable until setup is run; upgrade all peers before migrating.
 
-Alerts are opt-in. Configuring only a channel/one server role enables observation
-messages about all configured servers in that guild; only servers with a configured
-subscriber role mention subscribers. Setup does not retrospectively announce incidents
-that were already open before alerts were enabled.
+The role must have no permissions or channel grants. Members need access to the
+alert channel, and Discord notification settings still govern push notifications.
+The channel needs View Channel, Send Messages, Embed Links and Read Message History.
 
-Settings are committed locally and pushed to peers, with a count of pending copies
-in the response. Peers reconcile after reconnection. Discord interaction IDs order
-concurrent changes. This shared configuration is independent of the legacy fixed
-state owner; its outage does not prevent monitoring settings or subscriptions.
+In a peer network the shared channel/role is replicated. IP notifications prefer
+this shared channel over legacy per-machine channel settings. `enabled:false` on
+`/servers alerts` disables IP and health alerts for that guild; automatic update
+announcements retain their separate updater settings. Existing node-specific
+history, monitoring policies and maintenance windows remain separate.
+
+Settings report pending peer replication. Wait for zero pending copies before
+an outage test. Setup does not retrospectively announce already-open incidents.
 
 ## Status and history
 

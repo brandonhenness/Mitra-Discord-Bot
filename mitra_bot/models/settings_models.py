@@ -30,7 +30,7 @@ class AppSettingsModel(BaseModel):
     ip_poll_seconds: int = 900
     ups: UPSSettingsModel = Field(default_factory=UPSSettingsModel)
     admin_role_name: str = "Mitra Admin"
-    ip_subscriber_role_name: str = "Mitra IP Subscriber"
+    ip_subscriber_role_name: str = "Mitra Alerts"
 
     @field_validator("channel_id", "channel", mode="before")
     @classmethod

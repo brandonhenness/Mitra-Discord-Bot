@@ -51,7 +51,7 @@ def plan_records(zone, requested, existing):
 
 def configure_cloudflare(*, env_file=".env", open_browser=True, client_id=None, auth_method=None):
     ui.banner("MITRA  /  CLOUDFLARE", "Connect an account. Choose domains. Review your DNS assignments.")
-    ui.step("Connect your account", 1, 3)
+    ui.step("Connect your account", 1, 3, purpose="Authorize the Cloudflare account that owns the DNS records this machine should update.")
     cfg = read_config_dict()
     peer = load_peer_config()
     node_id = peer.node_id if peer.enabled else "local"
@@ -78,7 +78,7 @@ def configure_cloudflare(*, env_file=".env", open_browser=True, client_id=None, 
         ui.message(TOKEN_PAGE)
         if open_browser:
             webbrowser.open(TOKEN_PAGE)
-        token = getpass.getpass("Cloudflare API token (hidden): ").strip()
+        token = ui.secret("Cloudflare API token (hidden): ").strip()
         if not re.fullmatch(r"[A-Za-z0-9_.-]{20,256}", token):
             raise ValueError("Invalid token format")
     elif mode != "1":
@@ -87,7 +87,7 @@ def configure_cloudflare(*, env_file=".env", open_browser=True, client_id=None, 
     zones = ui.run("Finding your Cloudflare domains", service.get_zones)
     if not zones:
         raise RuntimeError("No accessible domains found. Grant Zone Read and DNS Edit for the desired zones, then retry.")
-    ui.step("Choose domains & records", 2, 3)
+    ui.step("Choose domains & records", 2, 3, purpose="Select the domain and subdomains that should follow this machine's public IP.")
     plans = []
     while zones:
         zone = choose("Domain", zones, lambda z: z["name"]+" ("+str(z.get("account", {}).get("name", "account"))+")")
@@ -109,7 +109,7 @@ def configure_cloudflare(*, env_file=".env", open_browser=True, client_id=None, 
     if creates and (not public_ip or ipaddress.ip_address(public_ip).version != 4):
         raise RuntimeError("Could not determine this server's IPv4 address; no DNS records were created.")
     proxied = yes("Enable Cloudflare's orange-cloud proxy for NEW records?", False) if creates else False
-    ui.step("Review & apply", 3, 3)
+    ui.step("Review & apply", 3, 3, purpose="Check the proposed DNS assignments before saving this machine's configuration.")
     ui.message(f"Assignments for {node_id} (existing record TTL/proxy settings are preserved):")
     for zone, planned in plans:
         for name, record in planned:
@@ -189,7 +189,7 @@ def repair_client(*, client_id=None, open_browser=True):
     ui.message(TOKEN_PAGE)
     if open_browser:
         webbrowser.open(TOKEN_PAGE)
-    token = getpass.getpass("Temporary OAuth client management API token (hidden): ").strip()
+    token = ui.secret("Temporary OAuth client management API token (hidden): ").strip()
     service = CloudflareService(api_token=token)
     endpoint = f"/accounts/{account_id}/oauth_clients/{client_id}"
     client = service._request("GET", endpoint).get("result")

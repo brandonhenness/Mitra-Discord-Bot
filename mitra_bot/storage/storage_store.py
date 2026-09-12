@@ -70,7 +70,7 @@ def _build_combined_snapshot() -> Dict[str, Any]:
         "channel_id": bot.get("channel_id"),
         "ip_poll_seconds": bot.get("ip_poll_seconds", 900),
         "admin_role_name": bot.get("admin_role_name", "Mitra Admin"),
-        "ip_subscriber_role_name": bot.get("ip_subscriber_role_name", "Mitra IP Subscriber"),
+        "ip_subscriber_role_name": bot.get("ip_subscriber_role_name", "Mitra Alerts"),
         "ups": cfg.get("ups", {}),
         "cloudflare": cfg.get("cloudflare", {}),
     }
@@ -92,7 +92,7 @@ def write_storage_json(data: Dict[str, Any]) -> None:
         "channel_id": normalized.get("channel_id") or normalized.get("channel"),
         "ip_poll_seconds": int(normalized.get("ip_poll_seconds", 900)),
         "admin_role_name": str(normalized.get("admin_role_name", "Mitra Admin")),
-        "ip_subscriber_role_name": str(normalized.get("ip_subscriber_role_name", "Mitra IP Subscriber")),
+        "ip_subscriber_role_name": str(normalized.get("ip_subscriber_role_name", "Mitra Alerts")),
     }
     cfg["ups"] = normalized.get("ups", {})
     cloudflare = normalized.get("cloudflare", {})

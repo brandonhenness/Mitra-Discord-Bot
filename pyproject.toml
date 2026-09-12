@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mitra-discord-bot"
-version = "0.1.2"
+version = "0.2.0b9"
 description = "Mitra Discord bot for home/server operations monitoring and controls."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -44,4 +44,4 @@ packages = ["mitra_bot"]
 
 [tool.hatch.build.targets.sdist]
 include = ["/mitra_bot", "/scripts", "/docs", "/tests", "/pyproject.toml", "/uv.lock", "/README.md", "/LICENSE", "/config.example.toml", "/peer-network.example.toml", "/.env.example", "/.env.production.example", "/Setup-MitraBot.cmd"]
-exclude = ["*.db", "*.db-*", "*.key", "*.jsonl", "*.log", "*.pyc", "**/__pycache__", "**/.env", "**/config.toml", "**/peer-network.toml"]
+exclude = ["*.db", "*.db-*", "*.key", "*.crt", "*.cer", "*.pem", "*.p12", "*.pfx", "*.csr", "*.srl", "*.jsonl", "*.log", "*.log.*", "*.before-membership-*", "*.pyc", "**/__pycache__", "**/.env", "**/config.toml", "**/peer-network.toml"]

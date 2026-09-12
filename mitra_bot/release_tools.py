@@ -76,7 +76,9 @@ def allowed_file(name):
         return False
     if any(part in {".git",".venv","__pycache__",".recovery","peer-bundles"} for part in path.parts):
         return False
-    if re.search(r"\.(?:db(?:-.*)?|sqlite(?:3)?(?:-.*)?|key|jsonl|pyc|log)$",path.name,re.I):
+    if re.search(r"\.(?:db(?:-.*)?|sqlite(?:3)?(?:-.*)?|key|crt|cer|pem|p12|pfx|csr|srl|jsonl|pyc|log(?:\..*)?)$",path.name,re.I):
+        return False
+    if ".before-membership-" in path.name:
         return False
     if path.name in {"config.toml","peer-network.toml","cache.json","data.json"}:
         return False

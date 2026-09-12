@@ -152,6 +152,7 @@ def test_find_existing_dashboard_supports_new_pin_wrappers():
         embed.set_footer(text=marker)
         message = SimpleNamespace(author=bot.user,embeds=[embed])
         async def pins():
+            yield SimpleNamespace(message=SimpleNamespace(author=bot.user, embeds=[discord.Embed(title="No footer")]))
             yield SimpleNamespace(message=message)
         channel.pins = pins
         assert await find_dashboard(channel,bot,marker) is message

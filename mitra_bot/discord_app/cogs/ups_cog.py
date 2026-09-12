@@ -1,5 +1,4 @@
 # mitra_bot/discord_app/cogs/ups_cog.py
-from __future__ import annotations
 
 import re
 import asyncio
@@ -12,6 +11,7 @@ from discord.ext import commands
 
 from mitra_bot.discord_app.checks import ensure_admin
 from mitra_bot.discord_app.server_target import resolve_server
+from mitra_bot.discord_app.node_commands import node_operation
 from mitra_bot.services.peer_service import PeerError
 from mitra_bot.services.ups.tripplite_client import TrippliteUPSClient
 from mitra_bot.services.ups.ups_log import UPSLogStore
@@ -239,6 +239,32 @@ class UPSCog(commands.Cog):
         self.service.config = self._build_service_config(ups_cfg)
         return ups_cfg
 
+    def apply_settings(self, payload):
+        if set(payload) == {"enabled"} and type(payload["enabled"]) is bool:
+            message = f"UPS monitoring {'enabled' if payload['enabled'] else 'disabled'}."
+        elif set(payload) == {"timezone"} and isinstance(payload["timezone"], str):
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            try:
+                ZoneInfo(payload["timezone"])
+            except (ValueError, ZoneInfoNotFoundError):
+                raise PeerError("Invalid timezone. Use an IANA name like UTC or America/Los_Angeles.")
+            message = f"UPS timezone set to `{payload['timezone']}`."
+        else:
+            raise PeerError("Invalid UPS settings")
+        set_ups_config(payload)
+        self._reload_from_cache()
+        return {"message": message}
+
+    async def _save_settings(self, ctx, server, payload):
+        await ctx.defer(ephemeral=True)
+        try:
+            target = resolve_server(self.bot, server)
+            result = await node_operation(self.bot, target, "ups_settings", payload)
+            message = f"**{target}**: {result['message']}"
+        except PeerError as exc:
+            message = f"UPS setting could not be confirmed: {exc} Check the selected node before retrying."
+        await ctx.respond(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
     @ups.command(name="monitoring", description="Enable or disable UPS monitoring")
     async def monitoring(
         self,
@@ -248,18 +274,14 @@ class UPSCog(commands.Cog):
             description="Set true to enable monitoring, false to disable.",
             required=True,
         ),
+        server: str = discord.Option(str, description="Server ID (default: configured state owner)", required=False, default=None),
     ):
         admin_guard = ensure_admin(ctx)
         if admin_guard:
             await admin_guard
             return
 
-        set_ups_config({"enabled": bool(enabled)})
-        self._reload_from_cache()
-        await ctx.respond(
-            f"UPS monitoring {'enabled' if enabled else 'disabled'}.",
-            ephemeral=True,
-        )
+        await self._save_settings(ctx, server, {"enabled": bool(enabled)})
 
     @ups.command(
         name="timezone", description="Set the timezone for UPS graph timestamps"
@@ -272,6 +294,7 @@ class UPSCog(commands.Cog):
             description="IANA timezone (examples: UTC, America/Los_Angeles, Europe/Berlin)",
             required=True,
         ),
+        server: str = discord.Option(str, description="Server ID (default: configured state owner)", required=False, default=None),
     ):
         admin_guard = ensure_admin(ctx)
         if admin_guard:
@@ -290,10 +313,7 @@ class UPSCog(commands.Cog):
             )
             return
 
-        set_ups_config({"timezone": tz})
-        self._reload_from_cache()
-
-        await ctx.respond(f"UPS timezone set to `{tz}`.", ephemeral=True)
+        await self._save_settings(ctx, server, {"timezone": tz})
 
     @ups.command(name="status", description="Show UPS status and a recent graph")
     async def status(

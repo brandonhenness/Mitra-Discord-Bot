@@ -49,7 +49,8 @@ if (-not (Test-Path -LiteralPath $UvPath -PathType Leaf)) {
 
 Push-Location -LiteralPath $RepoPath
 try {
-    & $UvPath run --no-sync --env-file $EnvFileName mitra-bot
+    # Run Python directly so the generated mitra-bot.exe remains replaceable.
+    & $UvPath run --no-sync --env-file $EnvFileName python -m mitra_bot.main
     if ($LASTEXITCODE -ne 0) {
         throw "Mitra exited with code $LASTEXITCODE."
     }

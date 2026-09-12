@@ -9,6 +9,8 @@ import discord
 from discord.ext import commands
 
 from mitra_bot.discord_app.checks import ensure_admin
+from mitra_bot.services.alert_roles import shared_role
+from mitra_bot.discord_app.command_errors import report_command_error
 from mitra_bot.services.update_service import (
     InstallResult,
     ReleaseInfo,
@@ -34,11 +36,16 @@ def _trim(text: str, limit: int = 900) -> str:
 
 
 class UpdatePromptView(discord.ui.View):
-    def __init__(self, cog: "UpdateCog", release: ReleaseInfo, *, source: str) -> None:
+    def __init__(self, cog: "UpdateCog", release: ReleaseInfo, *, source: str, server: str = "all") -> None:
         super().__init__(timeout=3600)
         self.cog = cog
         self.release = release
         self.source = source
+        self.server = server
+
+    async def on_error(self, error, item, interaction):
+        ctx = await interaction.client.get_application_context(interaction)
+        await report_command_error(ctx, error)
 
     def _is_admin_user(self, interaction: discord.Interaction) -> bool:
         guild = interaction.guild
@@ -65,10 +72,19 @@ class UpdatePromptView(discord.ui.View):
             return
 
         await interaction.response.defer()
+        fleet = getattr(self.cog.bot, "fleet_updates", None)
+        if fleet is not None:
+            plan = await fleet.begin(self.server, self.release.version, interaction.user.id,
+                                     channel_id=interaction.channel_id)
+            await interaction.edit_original_response(content=f"Rolling update `{plan['id']}` started for `{self.server}`. "
+                "Progress is posted in this channel; `/update status` also works. The rollout stops if a node fails to recover.", embed=None, view=None)
+            self.stop()
+            return
         await self.cog.install_release_with_feedback(
             release=self.release,
             message=interaction.message,
             source=self.source,
+            interaction=interaction,
         )
         self.stop()
 
@@ -238,11 +254,14 @@ class UpdateCog(commands.Cog):
             check=check,
             release=check.release,
             color=discord.Color.orange(),
-            description="A new release is available. Admins can install it using the button below.",
+            description="A new release is available. Install updates all configured nodes one at a time (or this installation in standalone mode).",
         )
+        role = shared_role(channel.guild) if getattr(channel, "guild", None) else None
         await channel.send(
+            content=role.mention if role else None,
             embed=embed,
             view=UpdatePromptView(self, check.release, source=source),
+            allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[role] if role else []),
         )
         set_updater_config({"last_notified_version": check.release.version})
 
@@ -270,12 +289,24 @@ class UpdateCog(commands.Cog):
         release: ReleaseInfo,
         message: Optional[discord.Message],
         source: str,
+        interaction: Optional[discord.Interaction] = None,
     ) -> None:
         if message is None:
             return
         if self._install_lock.locked():
-            await message.reply("An update install is already in progress.")
+            if interaction is not None:
+                await interaction.followup.send("An update install is already in progress.", ephemeral=True)
+            else:
+                await message.reply("An update install is already in progress.")
             return
+
+        async def edit_feedback(embed):
+            if interaction is not None:
+                # Component messages may be ephemeral after a peer claims /update.
+                # Message.edit uses the channel endpoint, which cannot edit them.
+                await interaction.edit_original_response(embed=embed, view=None)
+            else:
+                await message.edit(embed=embed, view=None)
 
         async with self._install_lock:
             installing_embed = self.build_embed(
@@ -285,7 +316,7 @@ class UpdateCog(commands.Cog):
                 color=discord.Color.gold(),
                 description=f"Starting install (triggered from `{source}`).",
             )
-            await message.edit(embed=installing_embed, view=None)
+            await edit_feedback(installing_embed)
 
             result: InstallResult = await asyncio.to_thread(install_release, release)
             if not result.ok:
@@ -296,7 +327,7 @@ class UpdateCog(commands.Cog):
                     color=discord.Color.red(),
                     description=f"Install failed: {_trim(result.error or 'unknown error', 500)}",
                 )
-                await message.edit(embed=failed_embed, view=None)
+                await edit_feedback(failed_embed)
                 return
 
             success_embed = self.build_embed(
@@ -309,7 +340,7 @@ class UpdateCog(commands.Cog):
                     "Restarting now."
                 ),
             )
-            await message.edit(embed=success_embed, view=None)
+            await edit_feedback(success_embed)
             await self._restart_after_update(origin_message=message)
 
     async def _send_latest_changelog(
@@ -351,11 +382,44 @@ class UpdateCog(commands.Cog):
             ephemeral=True,
         )
 
+    async def fleet_prompt(self, ctx, server):
+        guard = ensure_admin(ctx)
+        if guard:
+            await guard
+            return
+        await ctx.defer(ephemeral=True)
+        try:
+            fleet = self.bot.fleet_updates
+            states = await fleet.preview(server)
+            check = await asyncio.to_thread(check_latest_release)
+            if check.error or check.release is None:
+                raise ValueError(check.error or "No release available")
+            from packaging.version import Version
+            lines = [f"`{node}`: `{state['version'][:40]}`" for node, state in list(states.items())[:12]]
+            if len(states) > 12:
+                lines.append(f"...and {len(states)-12} additional nodes.")
+            newer = any(Version(state["version"]) < Version(check.release.version) for state in states.values())
+            text = (f"Target: `{server}` ? release `{check.release.version}`\n[Open release]({check.release.html_url})\n" + "\n".join(lines)
+                    + ("\nInstall updates one node at a time, coordinator last. A failed restart stops the rollout."
+                       if newer else "\nEvery selected node is already at this release or newer."))
+            await ctx.respond(text, ephemeral=True,
+                view=UpdatePromptView(self, check.release, source="fleet", server=server) if newer else None,
+                allowed_mentions=discord.AllowedMentions.none())
+        except ValueError as exc:
+            await ctx.respond(f"Could not prepare rolling update: {exc}", ephemeral=True)
+
     @update.command(
         name="check",
         description="Check GitHub for a new bot release (admins only).",
     )
-    async def check(self, ctx: discord.ApplicationContext) -> None:
+    async def check(self, ctx: discord.ApplicationContext,
+                    server: str = discord.Option(str, "Node ID or all (peer networks default to all)", default="all", required=False)) -> None:
+        if getattr(self.bot, "fleet_updates", None) is not None:
+            await self.fleet_prompt(ctx, server)
+            return
+        if server not in {"all", "local"}:
+            await ctx.respond("Standalone mode supports only server:local or server:all.", ephemeral=True)
+            return
         admin_guard = ensure_admin(ctx)
         if admin_guard:
             await admin_guard
@@ -422,7 +486,14 @@ class UpdateCog(commands.Cog):
         name="install",
         description="Install the latest bot release now (admins only).",
     )
-    async def install(self, ctx: discord.ApplicationContext) -> None:
+    async def install(self, ctx: discord.ApplicationContext,
+                      server: str = discord.Option(str, "Node ID or all (peer networks default to all)", default="all", required=False)) -> None:
+        if getattr(self.bot, "fleet_updates", None) is not None:
+            await self.fleet_prompt(ctx, server)
+            return
+        if server not in {"all", "local"}:
+            await ctx.respond("Standalone mode supports only server:local or server:all.", ephemeral=True)
+            return
         admin_guard = ensure_admin(ctx)
         if admin_guard:
             await admin_guard
@@ -457,6 +528,22 @@ class UpdateCog(commands.Cog):
             view=UpdatePromptView(self, check.release, source="manual-install"),
         )
 
+    @update.command(name="cancel", description="Stop a rolling update before starting any further nodes (admins only)")
+    async def cancel(self, ctx: discord.ApplicationContext):
+        guard = ensure_admin(ctx)
+        if guard:
+            await guard
+            return
+        fleet = getattr(self.bot, "fleet_updates", None)
+        if fleet is None:
+            await ctx.respond("No peer update coordinator is running.", ephemeral=True)
+            return
+        try:
+            plan_id = fleet.cancel(ctx.author.id)
+            await ctx.respond(f"Cancelled rollout `{plan_id}`. An installation already started will finish; no further nodes will start.", ephemeral=True)
+        except ValueError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+
     @update.command(
         name="status",
         description="Show updater settings and pending version (admins only).",
@@ -467,6 +554,19 @@ class UpdateCog(commands.Cog):
             await admin_guard
             return
 
+        fleet = getattr(self.bot, "fleet_updates", None)
+        if fleet is not None:
+            plans = fleet.rows("update_plans")
+            if plans:
+                plan = plans[0]
+                lines = [f"Rolling update `{plan['id']}` ? `{plan['version']}` ? **{plan['state']}**"]
+                lines += [f"`{n['node']}`: {n.get('phase') or n['state']}" for n in plan["nodes"]]
+                if plan.get("error"):
+                    lines.append(plan["error"])
+                text = "\n".join(lines)
+                for start in range(0, len(text), 1800):
+                    await ctx.respond(text[start:start+1800], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+                return
         cfg = get_updater_config()
         embed = discord.Embed(title="Updater Status", color=discord.Color.blurple())
         embed.add_field(

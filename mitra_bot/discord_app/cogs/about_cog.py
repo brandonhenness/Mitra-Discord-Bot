@@ -1,4 +1,3 @@
-from __future__ import annotations
 
 import platform
 import time
@@ -7,6 +6,8 @@ import discord
 from discord.ext import commands
 
 from mitra_bot import __version__
+from mitra_bot.discord_app.node_commands import selected_nodes, read_nodes
+from mitra_bot.services.peer_service import PeerError
 
 
 class AboutCog(commands.Cog):
@@ -15,7 +16,37 @@ class AboutCog(commands.Cog):
         self._started_at_epoch = int(time.time())
 
     @discord.slash_command(name="about", description="Show bot info and runtime details.")
-    async def about(self, ctx: discord.ApplicationContext) -> None:
+    async def about(self, ctx: discord.ApplicationContext,
+                    server: str = discord.Option(str, description="Server ID or all (default: all servers)", required=False, default=None)) -> None:
+        await ctx.defer(ephemeral=True)
+        if getattr(self.bot, "peer_service", None):
+            try:
+                nodes = selected_nodes(self.bot, server, default_all=True)
+            except PeerError as exc:
+                await ctx.respond(str(exc), ephemeral=True)
+                return
+            results = await read_nodes(self.bot, nodes, "node_info")
+            for start in range(0, len(results), 8):
+                embed = discord.Embed(title="Mitra Bot · network", color=discord.Color.blurple())
+                for node, data in results[start:start+8]:
+                    value = "Unavailable: check connectivity and node version."
+                    if data and data.get("error"):
+                        value = "Unavailable: " + data["error"]
+                    elif data:
+                        health = data.get("health", {})
+                        uptime = health.get("process_uptime_seconds", 0)
+                        value = (f"Version `{data['version']}` · Python `{data['python']}` · Py-Cord `{data['pycord']}`\n"
+                                 f"Process uptime: {uptime//3600}h {uptime//60%60}m\n"
+                                 f"Discord: {'connected' if health.get('discord_connected') else 'disconnected'}\n"
+                                 f"Discord servers: {data['discord_servers']}")
+                    embed.add_field(name=node, value=value, inline=False)
+                await ctx.respond(embed=embed, ephemeral=True)
+            return
+        try:
+            selected_nodes(self.bot, server, default_all=True)
+        except PeerError as exc:
+            await ctx.respond(str(exc), ephemeral=True)
+            return
         now = int(time.time())
         embed = discord.Embed(
             title="Mitra Bot",
@@ -30,7 +61,7 @@ class AboutCog(commands.Cog):
             value=f"<t:{self._started_at_epoch}:R>",
             inline=True,
         )
-        embed.add_field(name="Servers", value=f"`{len(self.bot.guilds)}`", inline=True)
+        embed.add_field(name="Discord servers", value=f"`{len(self.bot.guilds)}`", inline=True)
         embed.add_field(name="Now", value=f"<t:{now}:F>", inline=True)
         await ctx.respond(embed=embed, ephemeral=True)
 

@@ -109,5 +109,5 @@ def load_settings(*, interactive_token: bool = True) -> AppSettings:
         ip_poll_seconds=int(bot_cfg.get("ip_poll_seconds", 900)),
         ups=ups,
         admin_role_name=str(bot_cfg.get("admin_role_name", "Mitra Admin")),
-        ip_subscriber_role_name=str(bot_cfg.get("ip_subscriber_role_name", "Mitra IP Subscriber")),
+        ip_subscriber_role_name=str(bot_cfg.get("ip_subscriber_role_name", "Mitra Alerts")),
     )

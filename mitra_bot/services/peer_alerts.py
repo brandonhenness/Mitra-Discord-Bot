@@ -20,6 +20,7 @@ class PeerAlertDelivery:
         channel = self.bot.get_channel(setting["channel"]) or await self.bot.fetch_channel(setting["channel"])
         if not isinstance(channel, discord.TextChannel) or channel.guild.id != setting["guild"]:
             raise ValueError("Alert destination must be a text channel in the configured guild")
+        role_setting = setting if setting.get("role") else role_setting
         subject = incident["subject"]
         network = hashlib.sha256(self.mesh.config.network_id.encode()).hexdigest()[:16]
         prefix = f"mitra-health:{network}:{subject}:{incident['kind']}:"
@@ -32,7 +33,7 @@ class PeerAlertDelivery:
             if message.author.id != self.bot.user.id:
                 continue
             for embed in message.embeds:
-                footer = embed.footer.text or ""
+                footer = getattr(embed.footer, "text", None) or ""
                 if not footer.startswith(prefix):
                     continue
                 try:

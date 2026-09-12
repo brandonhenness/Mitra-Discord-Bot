@@ -15,6 +15,7 @@ matplotlib.use("Agg")  # headless-safe
 import matplotlib.dates as mdates  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.dates import ConciseDateFormatter  # noqa: E402
+from mitra_bot.services.graph_theme import FIG_BG, TEXT, ACCENT, style_axis
 
 try:
     from zoneinfo import ZoneInfo
@@ -170,13 +171,6 @@ def build_ups_status_graph(
         logging.info("UPS graph: not enough numeric points to graph.")
         return None
 
-    # ---- Exact original Discord Dark Theme Colors ----
-    FIG_BG = "#2B2D31"
-    AX_BG = "#313338"
-    TEXT = "#DBDEE1"
-    GRID = "#4E5058"
-    ACCENT = "#5865F2"
-
     fig = plt.figure(figsize=(12, 7), dpi=220)
     fig.patch.set_facecolor(FIG_BG)
 
@@ -185,13 +179,7 @@ def build_ups_status_graph(
     ax3 = fig.add_subplot(313, sharex=ax1)
 
     for ax in (ax1, ax2, ax3):
-        ax.set_facecolor(AX_BG)
-        ax.tick_params(colors=TEXT, labelsize=9)
-        ax.yaxis.label.set_color(TEXT)
-        ax.xaxis.label.set_color(TEXT)
-        ax.grid(True, color=GRID, alpha=0.25, linewidth=0.8)
-        for spine in ax.spines.values():
-            spine.set_color(GRID)
+        style_axis(ax)
 
     def _plot(ax, y: List[float], label: str, units: str):
         ax.plot(xs, y, linewidth=2.2, color=ACCENT, alpha=0.95)

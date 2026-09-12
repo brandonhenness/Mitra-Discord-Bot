@@ -19,7 +19,7 @@ def command_route(data: dict, mesh) -> tuple[str, bool]:
     target = next((o.get("value") for o in options if o.get("name") == "server"), None)
     if path[0] == "power" or path[:2] == ["ups", "status"]:
         return str(target or mesh.config.resolved_state_owner), True
-    if path[0] in {"servers", "about"}:
+    if path[0] in {"servers", "alerts", "about"} or path[:2] in (["ip", "status"], ["ip", "subscribe"], ["ip", "unsubscribe"]):
         return mesh.config.resolved_state_owner, True
     # Existing unreplicated application state has a fixed owner, never a random writer.
     return mesh.config.resolved_state_owner, False

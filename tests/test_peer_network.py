@@ -360,3 +360,92 @@ def test_different_discord_identity_cannot_issue_peer_commands(bundles, tmp_path
                 await nodes["a"].request("b", "health", {})
     asyncio.run(run())
 
+
+
+def test_only_state_owner_can_initiate_updates_over_real_tls(bundles, tmp_path):
+    async def run():
+        async with mesh(bundles, tmp_path) as nodes:
+            target = nodes["b"]
+            target.config.state_owner = "a"
+            target.update_rpc = AsyncMock(return_value={"accepted": True})
+            assert await nodes["a"].request("b", "update_install", {"job": "a"*32, "version": "1.0.0"}) == {"accepted": True}
+            target.update_rpc.reset_mock()
+            with pytest.raises(PeerError, match="rejected"):
+                await nodes["c"].request("b", "update_install", {"job": "c"*32, "version": "1.0.0"})
+            target.update_rpc.assert_not_awaited()
+            await nodes["c"].request("b", "update_status", {})
+            target.update_rpc.assert_awaited_once_with("update_status", {})
+    asyncio.run(run())
+
+
+def test_node_commands_and_settings_owner_permission_over_real_tls(bundles, tmp_path):
+    async def run():
+        async with mesh(bundles, tmp_path) as nodes:
+            target = nodes["b"]
+            target.config.state_owner = "a"
+            target.node_rpc = AsyncMock(return_value={"message": "saved"})
+            await nodes["a"].request("b", "ups_settings", {"enabled": False})
+            target.node_rpc.assert_awaited_once_with("ups_settings", {"enabled": False})
+            target.node_rpc.reset_mock()
+            with pytest.raises(PeerError, match="rejected"):
+                await nodes["c"].request("b", "ups_settings", {"enabled": True})
+            target.node_rpc.assert_not_awaited()
+            await nodes["c"].request("b", "node_info", {})
+            target.node_rpc.assert_awaited_once_with("node_info", {})
+            del target.node_rpc
+            with pytest.raises(PeerError, match="rejected"):
+                await nodes["a"].request("b", "public_ip", {})
+    asyncio.run(run())
+
+
+def test_membership_add_remove_and_apply_preserve_existing_identity(bundles, tmp_path):
+    from mitra_bot.peer_membership import prepare, apply_membership
+    import shutil
+    added = tmp_path / "added"
+    assert prepare(bundles, added, add="d=127.0.0.1") == ["a", "b", "c", "d"]
+    assert not (added/"OFFLINE-CA.key").exists()
+    for node in "abc":
+        assert (added/node/"node.key").read_bytes() == (bundles/node/"node.key").read_bytes()
+        cfg = PeerConfig.model_validate(tomllib.loads((added/node/"peer-network.toml").read_text()))
+        assert any(p.node_id == "d" and not p.allow_power for p in cfg.peers)
+    local = tmp_path/"live"
+    shutil.copytree(bundles/"b", local)
+    before = (local/"peer-network.toml").read_text()
+    backup = apply_membership(added/"b"/"peer-network.toml", local/"peer-network.toml")
+    assert backup.read_text() == before
+    assert 'node_id = "d"' in (local/"peer-network.toml").read_text()
+    with pytest.raises(ValueError, match="another"):
+        apply_membership(added/"a"/"peer-network.toml", local/"peer-network.toml")
+    removed = tmp_path/"removed"
+    assert prepare(added, removed, remove="d") == ["a", "b", "c"]
+    assert not (removed/"d").exists()
+    with pytest.raises(ValueError, match="state owner"):
+        prepare(added, tmp_path/"bad", remove="a")
+
+
+def test_hostname_reconnects_after_dns_address_changes_without_process_restart(bundles, tmp_path, monkeypatch):
+    async def run():
+        async with mesh(bundles, tmp_path) as nodes:
+            a, b = nodes["a"], nodes["b"]
+            loop = asyncio.get_running_loop()
+            original = loop.getaddrinfo
+            address, queries = ["127.0.0.1"], []
+            async def resolve(host, port, *args, **kwargs):
+                if host == "dynamic-peer.example":
+                    queries.append(address[0])
+                    host = address[0]
+                return await original(host, port, *args, **kwargs)
+            monkeypatch.setattr(loop, "getaddrinfo", resolve)
+            a.peers["b"].host = "dynamic-peer.example"
+            assert (await a.request("b", "health", {}))["node_id"] == "b"
+            old_boot = b.boot_id
+            port = b.server.sockets[0].getsockname()[1]
+            b.server.close()
+            await b.server.wait_closed()
+            server_ssl, _ = b._tls_contexts()
+            b.server = await asyncio.start_server(b._accept, "127.0.0.2", port, ssl=server_ssl)
+            address[0] = "127.0.0.2"
+            health = await a.request("b", "health", {})
+            assert health["boot_id"] == old_boot
+            assert queries == ["127.0.0.1", "127.0.0.2"]
+    asyncio.run(run())

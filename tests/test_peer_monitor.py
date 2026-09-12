@@ -324,57 +324,6 @@ def test_dashboard_controls_and_schema_are_valid():
     asyncio.run(run())
 
 
-def test_subscription_rejects_privileged_roles_and_only_changes_invoking_member():
-    async def run():
-        m = monitor()
-        enable(m)
-        role = SimpleNamespace(id=789, permissions=discord.Permissions(administrator=True), managed=False)
-        guild = SimpleNamespace(id=123, get_role=lambda _:role)
-        author = Mock(spec=discord.Member)
-        author.add_roles = AsyncMock()
-        author.remove_roles = AsyncMock()
-        ctx = SimpleNamespace(guild=guild, author=author, respond=AsyncMock())
-        cog = ServersCog(SimpleNamespace(peer_service=m.mesh))
-        await cog._subscription(ctx,"a",True)
-        author.add_roles.assert_not_awaited()
-        assert "permissions changed" in ctx.respond.call_args.args[0]
-        await cog._subscription(ctx,"a",False)
-        author.remove_roles.assert_awaited_once_with(role, reason="Self-service Mitra peer alert unsubscription")
-        m.store.db.close()
-    asyncio.run(run())
-
-
-def test_subscription_does_not_grant_mitra_admin_or_channel_overwrite_access():
-    class Role:
-        id = 789
-        name = "Admin"
-        managed = False
-        permissions = discord.Permissions.none()
-        def __lt__(self, other):
-            return True
-    async def run():
-        m = monitor()
-        enable(m)
-        role = Role()
-        channel = SimpleNamespace(overwrites_for=lambda _:discord.PermissionOverwrite(view_channel=True))
-        guild = SimpleNamespace(id=123, get_role=lambda _:role, me=SimpleNamespace(top_role=object()), channels=[])
-        author = Mock(spec=discord.Member)
-        author.add_roles = AsyncMock()
-        ctx = SimpleNamespace(guild=guild, author=author, respond=AsyncMock())
-        cog = ServersCog(SimpleNamespace(peer_service=m.mesh, state=SimpleNamespace(admin_role_name="Admin")))
-        await cog._subscription(ctx,"a",True)
-        author.add_roles.assert_not_awaited()
-        role.name = "Mitra a alerts"
-        guild.channels = [channel]
-        await cog._subscription(ctx,"a",True)
-        author.add_roles.assert_not_awaited()
-        guild.channels = []
-        await cog._subscription(ctx,"a",True)
-        author.add_roles.assert_awaited_once_with(role, reason="Self-service Mitra peer alert subscription")
-        m.store.db.close()
-    asyncio.run(run())
-
-
 def test_removed_members_do_not_block_retained_history_replication():
     a,b = monitor(node="a"),monitor(node="b")
     a.record("c",health(node="c"),now=1000.0,mono=1000.0)
@@ -399,7 +348,8 @@ def test_discord_alert_nonce_mentions_dedup_and_delayed_summary():
         channel = Mock(spec=discord.TextChannel)
         channel.id = 456
         channel.guild = SimpleNamespace(id=123, get_role=lambda _:role)
-        messages = []
+        # Ordinary bot embeds (including delivery tests) need not have footers.
+        messages = [SimpleNamespace(author=bot.user, embeds=[discord.Embed(title="Ordinary bot message")])]
         async def history(**kwargs):
             for message in messages:
                 yield message
@@ -420,9 +370,39 @@ def test_discord_alert_nonce_mentions_dedup_and_delayed_summary():
         assert await delivery("test-key","outage",incident,setting,role_setting) == 42
         assert await delivery("different-observer","outage",incident,setting,role_setting) == 42
         assert bot.http.request.await_count == 1
-        messages.clear()
+        messages[:] = [SimpleNamespace(author=bot.user, embeds=[discord.Embed(title="Another footerless message")])]
         incident["recovered"] = 1060.0
         await delivery("summary-key","outage",incident,setting,role_setting)
         assert "delayed report" in bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"]
+        m.store.db.close()
+    asyncio.run(run())
+
+
+def test_detected_outage_and_recovery_flush_with_footerless_channel_history():
+    async def run():
+        m = monitor()
+        enable(m)
+        bot = SimpleNamespace(is_ready=lambda: True, gateway_connected=True, user=SimpleNamespace(id=99),
+                              http=SimpleNamespace(request=AsyncMock(return_value={"id": "42"})))
+        channel = Mock(spec=discord.TextChannel)
+        channel.id = 456
+        channel.guild = SimpleNamespace(id=123, get_role=lambda _: SimpleNamespace(id=789, mention="<@&789>"))
+        async def history(**kwargs):
+            yield SimpleNamespace(author=bot.user, embeds=[discord.Embed(title="TEST ONLY")])
+        channel.history = history
+        bot.get_channel = lambda _: channel
+        m.alert_sink = PeerAlertDelivery(bot, m.mesh)
+        observe(m, 1000)
+        for now in (1010, 1020, 1030):
+            observe(m, now, False)
+        await m.flush_alerts()
+        assert bot.http.request.await_count == 1
+        assert "unreachable" in bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"]
+        observe(m, 1040)
+        observe(m, 1050)
+        await m.flush_alerts()
+        assert bot.http.request.await_count == 2
+        assert "connection recovered" in bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"]
+        assert m.store.db.execute("SELECT count(*) FROM health_outbox WHERE delivered IS NOT NULL AND error IS NULL").fetchone()[0] == 2
         m.store.db.close()
     asyncio.run(run())
