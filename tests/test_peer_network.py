@@ -66,6 +66,35 @@ async def mesh(bundles, tmp_path):
             await svc.close()
 
 
+def test_only_authenticated_owner_can_sync_remote_access(bundles, tmp_path):
+    from unittest.mock import Mock
+    async def run():
+        async with mesh(bundles, tmp_path) as services:
+            owner, follower, other = (services[node] for node in "abc")
+            owner.access_rpc = Mock(return_value={})
+            follower.access_rpc = Mock(return_value={"saved": True, "infrastructure_guild_ids": [123]})
+            for svc in services.values():
+                svc.configure_discord_identity("same-bot-token")
+            payload = {"infrastructure_guild_ids": [123]}
+            assert "infrastructure_access" in (await owner.request("b", "capabilities", {}))["operations"]
+            assert "infrastructure_access" not in (await follower.request("a", "capabilities", {}))["operations"]
+            with pytest.raises(PeerError):
+                await other.request("b", "infrastructure_access", payload)
+            follower.access_rpc.assert_not_called()
+            with pytest.raises(PeerError):
+                await follower.request("a", "infrastructure_access", payload)
+            owner.access_rpc.assert_not_called()
+            owner.configure_discord_identity("different-bot-token")
+            with pytest.raises(PeerError):
+                await owner.request("b", "infrastructure_access", payload)
+            follower.access_rpc.assert_not_called()
+            owner.configure_discord_identity("same-bot-token")
+            assert await owner.request("b", "infrastructure_access", payload) == {
+                "saved": True, "infrastructure_guild_ids": [123]}
+            follower.access_rpc.assert_called_once_with(payload)
+    asyncio.run(run())
+
+
 def test_optional_and_invalid_config(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("MITRA_PEER_CONFIG_PATH", raising=False)
