@@ -82,7 +82,7 @@ def test_shared_subscription_and_unsubscribe_clear_legacy_memberships(subscribe)
 
 def test_shared_commands_can_run_when_state_owner_is_down():
     mesh = SimpleNamespace(config=SimpleNamespace(resolved_state_owner="mitra"))
-    for name, sub in (("alerts", "subscribe"), ("ip", "unsubscribe")):
+    for name, sub in (("alerts", "subscribe"), ("alerts", "unsubscribe")):
         assert command_route({"name": name, "options": [{"type": 1, "name": sub}]}, mesh) == ("mitra", True)
 
 
@@ -105,13 +105,15 @@ def test_subscription_rejects_roles_that_grant_access(unsafe):
 def test_ip_notifications_use_shared_destination_and_honor_disable(monkeypatch):
     from mitra_bot.discord_app.cogs import ip_cog
     settings = [{"subject": "*", "guild": 1, "role": 10, "channel": 100, "enabled": True}]
-    mesh = SimpleNamespace(monitor=SimpleNamespace(store=SimpleNamespace(settings=lambda: settings)), notify=AsyncMock(return_value=True))
+    mesh = SimpleNamespace(config=SimpleNamespace(node_id="Anubis"), monitor=SimpleNamespace(store=SimpleNamespace(settings=lambda: settings)), notify=AsyncMock(return_value=True))
     bot = SimpleNamespace(peer_service=mesh, state=SimpleNamespace(channel_id=300))
     monkeypatch.setattr(ip_cog, "get_notification_channel_map", lambda: {1: 200})
     cog = ip_cog.IPCog(bot)
     assert asyncio.run(cog.notify_ip_change("203.0.113.1"))
     assert mesh.notify.call_args.args[0].channel_id == 100
     assert mesh.notify.call_args.args[0].mention_ip_subscribers is True
+    assert mesh.notify.call_args.args[0].message.startswith("### 🌐 Anubis's public IP address changed")
+    assert "```\n203.0.113.1\n```" in mesh.notify.call_args.args[0].message
     settings[0]["enabled"] = False
     mesh.notify.reset_mock()
     assert asyncio.run(cog.notify_ip_change("203.0.113.2"))

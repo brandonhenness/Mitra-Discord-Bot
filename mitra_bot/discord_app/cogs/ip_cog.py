@@ -1,3 +1,5 @@
+from mitra_bot.discord_app.message_style import notice
+from mitra_bot.discord_app.message_style import pages
 # mitra_bot/discord_app/cogs/ip_cog.py
 
 import logging
@@ -7,7 +9,7 @@ from discord.ext import commands
 
 from mitra_bot.services.notifier import Notifier
 from mitra_bot.services.peer_service import Notification
-from mitra_bot.services.alert_roles import shared_role, subscription
+from mitra_bot.services.alert_roles import shared_role
 from mitra_bot.discord_app.node_commands import selected_nodes, read_nodes
 from mitra_bot.services.peer_service import PeerError
 from mitra_bot.storage.storage_store import (
@@ -16,9 +18,10 @@ from mitra_bot.storage.storage_store import (
 )
 
 
-def _format_ip_message(ip: str, *, is_change: bool) -> str:
-    title = "🌐 Public IP changed" if is_change else "🌐 Current public IP"
-    return f"{title}:\n```{ip}```"
+def _format_ip_message(ip: str, *, is_change: bool, server: str | None = None) -> str:
+    title = (f"🌐 {server}'s public IP address changed" if server else "🌐 Public IP address changed") if is_change else "🌐 Current public IP address"
+    label = "New public IP address" if is_change else "Public IP address"
+    return f"### {title}\n\n**{label}**\n```\n{ip}\n```"
 
 
 class IPCog(commands.Cog):
@@ -37,22 +40,14 @@ class IPCog(commands.Cog):
         try:
             nodes = selected_nodes(self.bot, server, default_all=True)
         except PeerError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('IP address unavailable', str(exc), tone='error'), ephemeral=True)
             return
         results = await read_nodes(self.bot, nodes, "public_ip")
-        lines = [f"**{node}**: " + (f"`{data['ip']}`" if data and data.get("ip") else
-                 "Unavailable: " + (data.get("error", "Public-IP lookup failed.") if data else "Public-IP lookup failed.")) for node, data in results]
-        for start in range(0, len(lines), 8):
-            await ctx.respond("\n".join(lines[start:start+8]), ephemeral=True,
+        lines = [f"**{node}**\n" + (f"```\n{data['ip']}\n```" if data and data.get("ip") else
+                 "⚠️ Unavailable — " + discord.utils.escape_markdown(str(data.get("error", "Public-IP lookup failed.") if data else "Public-IP lookup failed.")[:180])) for node, data in results]
+        for message in pages("🌐 Public IP addresses", lines):
+            await ctx.respond(message, ephemeral=True,
                               allowed_mentions=discord.AllowedMentions.none())
-
-    @ip.command(name="subscribe", description="Subscribe to all Mitra alerts, including IP changes")
-    async def subscribe(self, ctx: discord.ApplicationContext):
-        await subscription(ctx, True)
-
-    @ip.command(name="unsubscribe", description="Unsubscribe from all Mitra operational alerts")
-    async def unsubscribe(self, ctx: discord.ApplicationContext):
-        await subscription(ctx, False)
 
     async def notify_ip_change(self, new_ip: str) -> bool:
         """
@@ -66,12 +61,12 @@ class IPCog(commands.Cog):
 
         logging.info("IP changed to %s — sending notification.", new_ip)
 
-        msg_body = _format_ip_message(new_ip, is_change=True)
+        mesh = getattr(self.bot, "peer_service", None)
+        msg_body = _format_ip_message(new_ip, is_change=True, server=mesh.config.node_id if mesh else None)
 
         notifier = Notifier(self.bot)
 
         # Every active instance reports its own IP events using local destinations.
-        mesh = getattr(self.bot, "peer_service", None)
         if mesh is not None:
             destinations = dict(get_notification_channel_map())
             for setting in mesh.monitor.store.settings():

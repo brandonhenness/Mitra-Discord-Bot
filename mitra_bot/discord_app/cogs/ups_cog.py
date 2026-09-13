@@ -1,3 +1,5 @@
+from mitra_bot.discord_app.message_style import embed as styled_embed
+from mitra_bot.discord_app.message_style import notice
 # mitra_bot/discord_app/cogs/ups_cog.py
 
 import re
@@ -263,7 +265,7 @@ class UPSCog(commands.Cog):
             message = f"**{target}**: {result['message']}"
         except PeerError as exc:
             message = f"UPS setting could not be confirmed: {exc} Check the selected node before retrying."
-        await ctx.respond(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        await ctx.respond(notice('UPS monitoring', message, tone='info'), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @ups.command(name="monitoring", description="Enable or disable UPS monitoring")
     async def monitoring(
@@ -308,7 +310,7 @@ class UPSCog(commands.Cog):
             ZoneInfo(tz)
         except Exception:
             await ctx.respond(
-                "Invalid timezone. Use an IANA name like `UTC` or `America/Los_Angeles`.",
+                notice('Choose a valid timezone', "Invalid timezone. Use an IANA name like `UTC` or `America/Los_Angeles`.", tone='warning'),
                 ephemeral=True,
             )
             return
@@ -339,7 +341,7 @@ class UPSCog(commands.Cog):
         try:
             target = resolve_server(self.bot, server)
         except PeerError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('UPS request could not finish', str(exc), tone='error'), ephemeral=True)
             return
         mesh = getattr(self.bot, "peer_service", None)
         if mesh is not None and target != mesh.config.node_id:
@@ -352,7 +354,7 @@ class UPSCog(commands.Cog):
 
         if not self.client.available:
             await ctx.respond(
-                "UPS monitoring is unavailable (tripplite not installed).",
+                notice('UPS monitoring', "UPS monitoring is unavailable (tripplite not installed).", tone='info'),
                 ephemeral=True,
             )
             return
@@ -433,41 +435,41 @@ class UPSCog(commands.Cog):
         shutdown_imminent = _flag("shutdown imminent")
 
         color = discord.Color.orange() if on_battery else discord.Color.green()
-        embed = discord.Embed(
+        embed = styled_embed(
             title=f"UPS Status — {target}",
-            description=f"Monitoring: `enabled={ups_cfg.get('enabled', True)}` | `poll={ups_cfg.get('poll_seconds', 30)}s`",
+            description=f"Monitoring {'enabled' if ups_cfg.get('enabled', True) else 'disabled'} · Checked every {ups_cfg.get('poll_seconds', 30)} seconds",
             color=color,
         )
-        embed.add_field(name="On Battery", value=f"`{on_battery}`", inline=True)
+        embed.add_field(name="Power source", value="Battery" if on_battery else "Utility power" if on_battery is False else "Unknown", inline=True)
         embed.add_field(name="Battery", value=f"`{batt_percent}%`" if batt_percent is not None else "`Unknown`", inline=True)
-        embed.add_field(name="Time To Empty", value=f"`{_fmt_seconds(tte)}`", inline=True)
+        embed.add_field(name="Estimated runtime", value=_fmt_seconds(tte), inline=True)
         embed.add_field(name="Health", value=f"`{health if health is not None else 'Unknown'}`", inline=True)
         embed.add_field(
             name="Input",
-            value=f"`V={in_v if in_v is not None else 'Unknown'} Hz={in_hz if in_hz is not None else 'Unknown'}`",
+            value=f"Voltage: {str(in_v) + ' V' if in_v is not None else 'Unknown'}\nFrequency: {str(in_hz) + ' Hz' if in_hz is not None else 'Unknown'}",
             inline=True,
         )
         embed.add_field(
             name="Output",
-            value=f"`V={out_v if out_v is not None else 'Unknown'} W={out_w if out_w is not None else 'Unknown'}`",
+            value=f"Voltage: {str(out_v) + ' V' if out_v is not None else 'Unknown'}\nLoad: {str(out_w) + ' W' if out_w is not None else 'Unknown'}",
             inline=True,
         )
 
         flags = []
         if ac_present is not None:
-            flags.append(f"AC present=`{ac_present}`")
+            flags.append(f"Utility power: {'Available' if ac_present else 'Unavailable'}")
         if charging is not None:
-            flags.append(f"Charging=`{charging}`")
+            flags.append(f"Charging: {'Yes' if charging else 'No'}")
         if discharging is not None:
-            flags.append(f"Discharging=`{discharging}`")
+            flags.append(f"Discharging: {'Yes' if discharging else 'No'}")
         if fully_charged is not None:
-            flags.append(f"Fully charged=`{fully_charged}`")
+            flags.append(f"Fully charged: {'Yes' if fully_charged else 'No'}")
         if needs_replacement is not None:
-            flags.append(f"Needs replacement=`{needs_replacement}`")
+            flags.append(f"Battery replacement needed: {'Yes' if needs_replacement else 'No'}")
         if shutdown_imminent is not None:
-            flags.append(f"Shutdown imminent=`{shutdown_imminent}`")
+            flags.append(f"Shutdown imminent: {'Yes' if shutdown_imminent else 'No'}")
         if flags:
-            embed.add_field(name="Flags", value="\n".join(flags), inline=False)
+            embed.add_field(name="Battery and power details", value="\n".join(flags), inline=False)
 
         embed.set_footer(text=f"Window: last {window_hours}h | Timezone: {tz_name}")
 
@@ -484,7 +486,7 @@ class UPSCog(commands.Cog):
         else:
             await ctx.respond(
                 embed=embed,
-                content="No graph data available yet.",
+                content=notice('History is not available yet', "No graph data available yet.", tone='info'),
                 ephemeral=True,
             )
 
@@ -508,7 +510,7 @@ class UPSCog(commands.Cog):
         try:
             snapshot, stale = await mesh.snapshot(target)
         except PeerError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('UPS request could not finish', str(exc), tone='error'), ephemeral=True)
             return
         window = int(hours or 6)
         # An offline graph is relative to capture time, so old data stays visible.
@@ -523,13 +525,15 @@ class UPSCog(commands.Cog):
             except (ValueError, TypeError):
                 continue
         live = snapshot["live"]
-        embed = discord.Embed(
+        embed = styled_embed(
             title=f"UPS Status — {target}",
             description=("**OFFLINE / UNREACHABLE — cached data**" if stale else "Live peer response")
                         + f"\nCaptured <t:{snapshot['captured_at']}:F>",
             color=discord.Color.orange() if stale else discord.Color.green(),
         )
-        for name, key in (("On Battery", "on_battery"), ("Battery (%)", "battery_percent"), ("Health", "health")):
+        battery = live.get("on_battery")
+        embed.add_field(name="Power source", value="Battery" if battery else "Utility power" if battery is False else "Unknown")
+        for name, key in (("Battery (%)", "battery_percent"), ("Health", "health")):
             embed.add_field(name=name, value=str(live.get(key, "Unknown"))[:1024])
         embed.add_field(name="UPS support", value="Available" if snapshot["available"] else "Unavailable")
         embed.set_footer(text=f"{len(rows)} samples | Last {window}h before capture | {snapshot['timezone']}")
@@ -538,7 +542,7 @@ class UPSCog(commands.Cog):
             embed.set_image(url="attachment://ups_status.png")
             await ctx.respond(embed=embed, file=discord.File(graph, filename="ups_status.png"), ephemeral=True)
         else:
-            await ctx.respond(embed=embed, content="No graph data available." if not rows else None, ephemeral=True)
+            await ctx.respond(embed=embed, content=notice('History is not available yet', "No graph data available.") if not rows else None, ephemeral=True)
 
     def poll_for_event(self):
         """

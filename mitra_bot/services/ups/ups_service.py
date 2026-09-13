@@ -245,12 +245,12 @@ class UPSService:
             if current_state == "battery":
                 return UPSEvent(
                     level="warn",
-                    message=f"⚠️ UPS switched to battery power. Runtime: **{_fmt_seconds(time_to_empty_s)}**",
+                    message=f"### ⚠️ UPS switched to battery power\n\nUtility power is unavailable. The UPS is supplying battery power.\n\n**Estimated runtime** {_fmt_seconds(time_to_empty_s)}",
                 )
 
             return UPSEvent(
                 level="info",
-                message="✅ Utility power restored.",
+                message="### ✅ Utility power restored\n\nThe UPS is back on utility power.",
             )
 
         # ------------------------------------------------------------------
@@ -274,13 +274,13 @@ class UPSService:
             self._handle_auto_shutdown()
             return UPSEvent(
                 level="critical",
-                message=f"🚨 UPS battery critical. Runtime: **{_fmt_seconds(time_to_empty_seconds)}**",
+                message=f"### 🚨 UPS battery is critically low\n\nThe battery has reached the critical runtime threshold.\n\n**Estimated runtime** {_fmt_seconds(time_to_empty_seconds)}",
             )
 
         if time_to_empty_seconds <= self.config.warn_time_to_empty_seconds:
             return UPSEvent(
                 level="warn",
-                message=f"⚠️ UPS battery running low. Runtime: **{_fmt_seconds(time_to_empty_seconds)}**",
+                message=f"### ⚠️ UPS battery is running low\n\nThe battery has reached the warning runtime threshold.\n\n**Estimated runtime** {_fmt_seconds(time_to_empty_seconds)}",
             )
 
         return None

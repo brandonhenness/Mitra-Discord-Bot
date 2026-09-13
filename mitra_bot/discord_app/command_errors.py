@@ -1,4 +1,5 @@
 """Report command failures without exposing exception details to Discord."""
+from mitra_bot.discord_app.message_style import notice
 import logging
 
 import discord
@@ -20,10 +21,10 @@ async def report_command_error(ctx, error):
     try:
         if ctx.interaction.response.is_done():
             await ctx.interaction.edit_original_response(
-                content=message, embeds=[], view=None,
+                content=notice('Command could not finish', message, tone='error'), embeds=[], view=None,
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         else:
-            await ctx.respond(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            await ctx.respond(notice('Command could not finish', message, tone='error'), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
     except (discord.HTTPException, OSError):
         logging.warning("Could not deliver command error for interaction %s", ctx.interaction.id, exc_info=True)

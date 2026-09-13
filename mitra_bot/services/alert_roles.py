@@ -1,4 +1,5 @@
 """One permissionless subscription role for all Mitra operational alerts."""
+from mitra_bot.discord_app.message_style import notice
 import discord
 
 ALERT_ROLE = "Mitra Alerts"
@@ -58,7 +59,7 @@ async def configure_shared_role(bot, guild):
 
 async def subscription(ctx, subscribe, user=None):
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
-        await ctx.respond("This command can only be used in a server.", ephemeral=True)
+        await ctx.respond(notice('Use this command in Discord', "This command can only be used in a server.", tone='warning'), ephemeral=True)
         return
     if user is not None:
         from mitra_bot.discord_app.checks import ensure_admin
@@ -67,7 +68,7 @@ async def subscription(ctx, subscribe, user=None):
             await guard
             return
         if not isinstance(user, discord.Member) or user.guild.id != ctx.guild.id:
-            await ctx.respond("Choose a member of this Discord server.", ephemeral=True)
+            await ctx.respond(notice('Alert subscriptions', "Choose a member of this Discord server.", tone='info'), ephemeral=True)
             return
     target = ctx.author if user is None else user
     reason = "Subscribed to all Mitra alerts" if subscribe else "Unsubscribed from all Mitra alerts"
@@ -90,6 +91,6 @@ async def subscription(ctx, subscribe, user=None):
         message = "Subscribed to all Mitra alerts." if subscribe else "Unsubscribed from all Mitra alerts."
         if user is not None:
             message = f"{target.mention}: {message}"
-        await ctx.respond(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        await ctx.respond(notice('Subscription updated', message, tone='success'), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
     except (ValueError, discord.HTTPException) as exc:
-        await ctx.respond(f"Could not change subscription: {exc}", ephemeral=True)
+        await ctx.respond(notice('Action could not finish', f"Could not change subscription: {exc}", tone='error'), ephemeral=True)
