@@ -94,7 +94,7 @@ def test_private_command_is_denied_before_peer_routing_or_handler(monkeypatch, p
 def test_public_about_never_queries_nodes():
     bot = SimpleNamespace(state=bot_state(1), peer_service=SimpleNamespace())
     ctx = SimpleNamespace(guild=SimpleNamespace(id=2), respond=AsyncMock())
-    asyncio.run(AboutCog.about.callback(AboutCog(bot), ctx, "private-node"))
+    asyncio.run(AboutCog.about.callback(AboutCog(bot), ctx))
     text = str(ctx.respond.call_args.kwargs["embed"].to_dict())
     assert "private-node" not in text and "Python" not in text
     assert "/todo list_create" in text
