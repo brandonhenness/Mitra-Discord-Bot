@@ -1,4 +1,6 @@
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import embed as styled_embed
+from mitra_bot.discord_app.message_style import notice
 
 import asyncio
 import logging
@@ -66,7 +68,7 @@ class UpdatePromptView(discord.ui.View):
     ) -> None:
         if not self._is_admin_user(interaction):
             await interaction.response.send_message(
-                "Only members with the admin role can install updates.",
+                notice('Administrator access required', "Only members with the admin role can install updates.", tone='warning'),
                 ephemeral=True,
             )
             return
@@ -76,8 +78,9 @@ class UpdatePromptView(discord.ui.View):
         if fleet is not None:
             plan = await fleet.begin(self.server, self.release.version, interaction.user.id,
                                      channel_id=interaction.channel_id)
-            await interaction.edit_original_response(content=f"Rolling update `{plan['id']}` started for `{self.server}`. "
-                "Progress is posted in this channel; `/update status` also works. The rollout stops if a node fails to recover.", embed=None, view=None)
+            await interaction.edit_original_response(content=notice('Rolling update started', f"**Servers** `{self.server}`\n**Update reference** `{plan['id']}`\n\n"
+                "Progress is posted in this channel. Use `/update status` to check at any time.\n"
+                "The rollout stops if a server fails to recover.", tone='info'), embed=None, view=None)
             self.stop()
             return
         await self.cog.install_release_with_feedback(
@@ -94,7 +97,7 @@ class UpdatePromptView(discord.ui.View):
     ) -> None:
         if not self._is_admin_user(interaction):
             await interaction.response.send_message(
-                "Only members with the admin role can dismiss updates.",
+                notice('Administrator access required', "Only members with the admin role can dismiss updates.", tone='warning'),
                 ephemeral=True,
             )
             return
@@ -110,7 +113,7 @@ class UpdatePromptView(discord.ui.View):
         )
         await interaction.response.edit_message(
             embed=self.cog.build_embed(
-                title="Update Available (Dismissed)",
+                title="Update dismissed",
                 check=None,
                 release=self.release,
                 color=discord.Color.dark_grey(),
@@ -140,7 +143,7 @@ class UpdateCog(commands.Cog):
         color: discord.Color,
         description: Optional[str] = None,
     ) -> discord.Embed:
-        embed = discord.Embed(
+        embed = styled_embed(
             title=title,
             description=description or "",
             color=color,
@@ -166,7 +169,8 @@ class UpdateCog(commands.Cog):
                 )
 
         if release is not None:
-            embed.add_field(name="Version", value=f"`{release.version}`", inline=True)
+            if check is None:
+                embed.add_field(name="Release version", value=f"`{release.version}`", inline=True)
             if release.html_url:
                 embed.add_field(
                     name="Release",
@@ -174,7 +178,7 @@ class UpdateCog(commands.Cog):
                     inline=True,
                 )
             embed.add_field(
-                name="Notes",
+                name="What changed",
                 value=_trim(release.notes),
                 inline=False,
             )
@@ -270,12 +274,12 @@ class UpdateCog(commands.Cog):
             spawn_replacement_process()
         except Exception as exc:
             await origin_message.channel.send(
-                f"Update installed, but failed to spawn replacement process: `{exc}`"
+                notice('Update request could not finish', f"Update installed, but failed to spawn replacement process: `{exc}`", tone='error')
             )
             return
 
         await origin_message.channel.send(
-            "Update installed. Restarting bot process now."
+            notice('Update installed', "Update installed. Restarting bot process now.", tone='success')
         )
         setattr(self.bot, "_mitra_restart_requested", True)
         try:
@@ -295,7 +299,7 @@ class UpdateCog(commands.Cog):
             return
         if self._install_lock.locked():
             if interaction is not None:
-                await interaction.followup.send("An update install is already in progress.", ephemeral=True)
+                await interaction.followup.send(notice('An action is already in progress', "An update install is already in progress.", tone='warning'), ephemeral=True)
             else:
                 await message.reply("An update install is already in progress.")
             return
@@ -310,7 +314,7 @@ class UpdateCog(commands.Cog):
 
         async with self._install_lock:
             installing_embed = self.build_embed(
-                title="Installing Update",
+                title="Installing update",
                 check=None,
                 release=release,
                 color=discord.Color.gold(),
@@ -321,7 +325,7 @@ class UpdateCog(commands.Cog):
             result: InstallResult = await asyncio.to_thread(install_release, release)
             if not result.ok:
                 failed_embed = self.build_embed(
-                    title="Update Failed",
+                    title="Update failed",
                     check=None,
                     release=release,
                     color=discord.Color.red(),
@@ -331,7 +335,7 @@ class UpdateCog(commands.Cog):
                 return
 
             success_embed = self.build_embed(
-                title="Update Installed",
+                title="Update installed",
                 check=None,
                 release=release,
                 color=discord.Color.green(),
@@ -399,14 +403,14 @@ class UpdateCog(commands.Cog):
             if len(states) > 12:
                 lines.append(f"...and {len(states)-12} additional nodes.")
             newer = any(Version(state["version"]) < Version(check.release.version) for state in states.values())
-            text = (f"Target: `{server}` ? release `{check.release.version}`\n[Open release]({check.release.html_url})\n" + "\n".join(lines)
+            text = (f"**Servers to update** `{server}`\n**Release** `{check.release.version}` · [View release]({check.release.html_url})\n\n" + "\n".join(lines)
                     + ("\nInstall updates one node at a time, coordinator last. A failed restart stops the rollout."
                        if newer else "\nEvery selected node is already at this release or newer."))
-            await ctx.respond(text, ephemeral=True,
+            await ctx.respond(notice('Review the server update', text), ephemeral=True,
                 view=UpdatePromptView(self, check.release, source="fleet", server=server) if newer else None,
                 allowed_mentions=discord.AllowedMentions.none())
         except ValueError as exc:
-            await ctx.respond(f"Could not prepare rolling update: {exc}", ephemeral=True)
+            await ctx.respond(notice('Update request could not finish', f"Could not prepare rolling update: {exc}", tone='error'), ephemeral=True)
 
     @update.command(
         name="check",
@@ -418,7 +422,7 @@ class UpdateCog(commands.Cog):
             await self.fleet_prompt(ctx, server)
             return
         if server not in {"all", "local"}:
-            await ctx.respond("Standalone mode supports only server:local or server:all.", ephemeral=True)
+            await ctx.respond(notice('Bot updates', "Standalone mode supports only server:local or server:all.", tone='info'), ephemeral=True)
             return
         admin_guard = ensure_admin(ctx)
         if admin_guard:
@@ -430,7 +434,7 @@ class UpdateCog(commands.Cog):
         if check.error:
             await ctx.followup.send(
                 embed=self.build_embed(
-                    title="Update Check Failed",
+                    title="Update check failed",
                     check=check,
                     release=None,
                     color=discord.Color.red(),
@@ -451,7 +455,7 @@ class UpdateCog(commands.Cog):
             )
             await ctx.followup.send(
                 embed=self.build_embed(
-                    title="No Update Available",
+                    title="Mitra is up to date",
                     check=check,
                     release=None,
                     color=discord.Color.green(),
@@ -473,7 +477,7 @@ class UpdateCog(commands.Cog):
 
         await ctx.followup.send(
             embed=self.build_embed(
-                title="Update Available",
+                title="Update available",
                 check=check,
                 release=check.release,
                 color=discord.Color.orange(),
@@ -492,7 +496,7 @@ class UpdateCog(commands.Cog):
             await self.fleet_prompt(ctx, server)
             return
         if server not in {"all", "local"}:
-            await ctx.respond("Standalone mode supports only server:local or server:all.", ephemeral=True)
+            await ctx.respond(notice('Bot updates', "Standalone mode supports only server:local or server:all.", tone='info'), ephemeral=True)
             return
         admin_guard = ensure_admin(ctx)
         if admin_guard:
@@ -503,7 +507,7 @@ class UpdateCog(commands.Cog):
         check = await asyncio.to_thread(check_latest_release)
         if check.error or not check.available or check.release is None:
             await ctx.followup.send(
-                "No installable update found. Run `/update check` for details.",
+                notice('No update to install', "No installable update found. Run `/update check` for details.", tone='info'),
                 ephemeral=True,
             )
             return
@@ -519,7 +523,7 @@ class UpdateCog(commands.Cog):
         )
         await ctx.followup.send(
             embed=self.build_embed(
-                title="Confirm Update Install",
+                title="Review and install the update",
                 check=check,
                 release=check.release,
                 color=discord.Color.orange(),
@@ -536,13 +540,13 @@ class UpdateCog(commands.Cog):
             return
         fleet = getattr(self.bot, "fleet_updates", None)
         if fleet is None:
-            await ctx.respond("No peer update coordinator is running.", ephemeral=True)
+            await ctx.respond(notice('Bot updates', "No peer update coordinator is running.", tone='info'), ephemeral=True)
             return
         try:
             plan_id = fleet.cancel(ctx.author.id)
-            await ctx.respond(f"Cancelled rollout `{plan_id}`. An installation already started will finish; no further nodes will start.", ephemeral=True)
+            await ctx.respond(notice('Rolling update cancelled', f"Cancelled rollout `{plan_id}`. An installation already started will finish; no further nodes will start.", tone='warning'), ephemeral=True)
         except ValueError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('Update request could not finish', str(exc), tone='error'), ephemeral=True)
 
     @update.command(
         name="status",
@@ -559,27 +563,24 @@ class UpdateCog(commands.Cog):
             plans = fleet.rows("update_plans")
             if plans:
                 plan = plans[0]
-                lines = [f"Rolling update `{plan['id']}` ? `{plan['version']}` ? **{plan['state']}**"]
-                lines += [f"`{n['node']}`: {n.get('phase') or n['state']}" for n in plan["nodes"]]
-                if plan.get("error"):
-                    lines.append(plan["error"])
-                text = "\n".join(lines)
-                for start in range(0, len(text), 1800):
-                    await ctx.respond(text[start:start+1800], ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+                from mitra_bot.services.fleet_updates import FleetUpdates
+                from mitra_bot.discord_app.message_style import pages
+                for text in pages(FleetUpdates.progress_title(plan), FleetUpdates.progress_sections(plan, full=True)):
+                    await ctx.respond(text, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
                 return
         cfg = get_updater_config()
-        embed = discord.Embed(title="Updater Status", color=discord.Color.blurple())
+        embed = styled_embed(title="Update settings", color=discord.Color.blurple())
         embed.add_field(
-            name="Enabled", value=f"`{bool(cfg.get('enabled', True))}`", inline=True
+            name="Enabled", value="Enabled" if cfg.get("enabled", True) else "Disabled", inline=True
         )
         embed.add_field(
             name="Startup Check",
-            value=f"`{bool(cfg.get('check_on_startup', True))}`",
+            value="Enabled" if cfg.get("check_on_startup", True) else "Disabled",
             inline=True,
         )
         embed.add_field(
             name="Beta Releases",
-            value=f"`{bool(cfg.get('include_prerelease', False))}`",
+            value="Included" if cfg.get("include_prerelease", False) else "Stable releases only",
             inline=True,
         )
         embed.add_field(
@@ -604,7 +605,7 @@ class UpdateCog(commands.Cog):
         )
         embed.add_field(
             name="Last Checked",
-            value=f"`{cfg.get('last_checked_epoch') or 'never'}`",
+            value=f"<t:{int(cfg['last_checked_epoch'])}:R>" if cfg.get("last_checked_epoch") else "Never",
             inline=True,
         )
         repo = cfg.get("github_repo") or "auto"
@@ -631,7 +632,7 @@ class UpdateCog(commands.Cog):
 
         set_updater_config({"enabled": enabled})
         await ctx.respond(
-            f"Automatic update checks are now {'enabled' if enabled else 'disabled'}.",
+            notice('Update settings saved', f"Automatic update checks are now {'enabled' if enabled else 'disabled'}.", tone='info'),
             ephemeral=True,
         )
 
@@ -664,12 +665,12 @@ class UpdateCog(commands.Cog):
             }
         )
         await ctx.respond(
-            (
+            notice('Bot updates', (
                 "Updater now includes pre-releases."
                 if enabled
                 else "Updater is now stable-only (pre-releases disabled)."
             )
-            + " Run `/update check` to refresh availability.",
+            + " Run `/update check` to refresh availability.", tone='info'),
             ephemeral=True,
         )
 
@@ -693,7 +694,7 @@ class UpdateCog(commands.Cog):
 
         set_updater_config({"check_on_startup": enabled})
         await ctx.respond(
-            f"Startup update checks are now {'enabled' if enabled else 'disabled'}.",
+            notice('Update settings saved', f"Startup update checks are now {'enabled' if enabled else 'disabled'}.", tone='info'),
             ephemeral=True,
         )
 
@@ -719,7 +720,7 @@ class UpdateCog(commands.Cog):
 
         set_updater_config({"check_interval_seconds": int(seconds)})
         await ctx.respond(
-            f"Update check interval set to `{int(seconds)}` seconds.",
+            notice('Update settings saved', f"Update check interval set to `{int(seconds)}` seconds.", tone='info'),
             ephemeral=True,
         )
 
@@ -745,14 +746,14 @@ class UpdateCog(commands.Cog):
         if value.lower() == "auto":
             set_updater_config({"github_repo": None})
             await ctx.respond(
-                "Updater repository reset to auto-detect from git remote.",
+                notice('Bot updates', "Updater repository reset to auto-detect from git remote.", tone='info'),
                 ephemeral=True,
             )
             return
 
         if "/" not in value or value.count("/") != 1:
             await ctx.respond(
-                "Repository must be in `owner/name` format, or `auto`.",
+                notice('Bot updates', "Repository must be in `owner/name` format, or `auto`.", tone='info'),
                 ephemeral=True,
             )
             return
@@ -762,7 +763,7 @@ class UpdateCog(commands.Cog):
         name = name.strip()
         if not owner or not name:
             await ctx.respond(
-                "Repository must be in `owner/name` format, or `auto`.",
+                notice('Bot updates', "Repository must be in `owner/name` format, or `auto`.", tone='info'),
                 ephemeral=True,
             )
             return
@@ -770,7 +771,7 @@ class UpdateCog(commands.Cog):
         normalized = f"{owner}/{name}"
         set_updater_config({"github_repo": normalized})
         await ctx.respond(
-            f"Updater repository set to `{normalized}`.",
+            notice('Bot updates', f"Updater repository set to `{normalized}`.", tone='info'),
             ephemeral=True,
         )
 
@@ -787,7 +788,7 @@ class UpdateCog(commands.Cog):
         cfg = get_updater_config()
         pending_version = cfg.get("pending_version")
         if not pending_version:
-            await ctx.respond("There is no pending update to dismiss.", ephemeral=True)
+            await ctx.respond(notice('No pending update', "There is no pending update to dismiss.", tone='info'), ephemeral=True)
             return
 
         set_updater_config(
@@ -796,7 +797,7 @@ class UpdateCog(commands.Cog):
             }
         )
         await ctx.respond(
-            f"Dismissed update `{pending_version}`. Use `/update install` anytime to apply it.",
+            notice('Update dismissed', f"Dismissed update `{pending_version}`. Use `/update install` anytime to apply it.", tone='info'),
             ephemeral=True,
         )
 

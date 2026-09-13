@@ -319,7 +319,18 @@ def test_dashboard_controls_and_schema_are_valid():
         cog.servers.integration_types = {discord.IntegrationType.guild_install}
         cog.servers.contexts = {discord.InteractionContextType.guild}
         definition = cog.servers.to_dict()
-        assert {v["name"] for v in definition["options"]} >= {"status","dashboard","incidents","alerts","subscribe","unsubscribe","monitoring"}
+        assert {v["name"] for v in definition["options"]} >= {"status","dashboard","incidents","alerts","monitoring"}
+        assert not {"subscribe", "unsubscribe"} & {v["name"] for v in definition["options"]}
+        from mitra_bot.discord_app.cogs.ip_cog import IPCog
+        ip = IPCog(bot)
+        bot.add_cog(ip)
+        for group in (ip.ip, cog.alerts_group):
+            group.integration_types = {discord.IntegrationType.guild_install}
+            group.contexts = {discord.InteractionContextType.guild}
+        assert {v["name"] for v in ip.ip.to_dict()["options"]} == {"status"}
+        subscriptions = {v["name"]: v for v in cog.alerts_group.to_dict()["options"]}
+        for name in ("subscribe", "unsubscribe"):
+            assert any(option["name"] == "user" for option in subscriptions[name]["options"])
         await bot.close()
     asyncio.run(run())
 
@@ -364,16 +375,37 @@ def test_discord_alert_nonce_mentions_dedup_and_delayed_summary():
         assert payload["enforce_nonce"] is True
         assert payload["allowed_mentions"] == {"parse":[],"roles":["789"],"users":[]}
         assert len(payload["nonce"]) <= 25
+        alert = payload["embeds"][0]
+        assert alert["title"] == "🔴 Lost contact with a"
+        assert "mitra-health:" not in alert["footer"]["text"]
+        assert {field["name"] for field in alert["fields"]} >= {"Monitoring", "Observed by", "Timeline"}
         from datetime import datetime, timezone
         messages.append(SimpleNamespace(id=42, author=bot.user, embeds=[discord.Embed.from_dict(payload["embeds"][0])],
                                         created_at=datetime.now(timezone.utc)))
         assert await delivery("test-key","outage",incident,setting,role_setting) == 42
         assert await delivery("different-observer","outage",incident,setting,role_setting) == 42
         assert bot.http.request.await_count == 1
+        # Existing alerts from releases that stored the marker in the footer
+        # must still suppress duplicate delivery after upgrading.
+        from urllib.parse import unquote
+        legacy = discord.Embed(title="Legacy alert")
+        legacy.set_footer(text=unquote(alert["url"].split("#", 1)[1]))
+        messages[-1].embeds = [legacy]
+        assert await delivery("test-key", "outage", incident, setting, role_setting) == 42
+        assert bot.http.request.await_count == 1
         messages[:] = [SimpleNamespace(author=bot.user, embeds=[discord.Embed(title="Another footerless message")])]
         incident["recovered"] = 1060.0
         await delivery("summary-key","outage",incident,setting,role_setting)
         assert "delayed report" in bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"]
+        summary = bot.http.request.call_args.kwargs["json"]["embeds"][0]
+        assert next(f["value"] for f in summary["fields"] if f["name"] == "Observed interruption") == "1m 0s"
+        incident["kind"] = "discord"
+        incident["recovered"] = None
+        await delivery("discord-outage", "outage", incident, setting, role_setting)
+        assert bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"] == "🟠 a lost its Discord connection"
+        incident["recovered"] = 1060.0
+        await delivery("discord-recovery", "recovery", incident, setting, role_setting)
+        assert bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"] == "🟢 a reconnected to Discord"
         m.store.db.close()
     asyncio.run(run())
 
@@ -397,12 +429,12 @@ def test_detected_outage_and_recovery_flush_with_footerless_channel_history():
             observe(m, now, False)
         await m.flush_alerts()
         assert bot.http.request.await_count == 1
-        assert "unreachable" in bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"]
+        assert "Lost contact with" in bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"]
         observe(m, 1040)
         observe(m, 1050)
         await m.flush_alerts()
         assert bot.http.request.await_count == 2
-        assert "connection recovered" in bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"]
+        assert "Connection to" in bot.http.request.call_args.kwargs["json"]["embeds"][0]["title"]
         assert m.store.db.execute("SELECT count(*) FROM health_outbox WHERE delivered IS NOT NULL AND error IS NULL").fetchone()[0] == 2
         m.store.db.close()
     asyncio.run(run())

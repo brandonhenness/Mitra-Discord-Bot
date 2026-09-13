@@ -23,6 +23,13 @@ opens those pages only when you choose to review or repair them. Use `--plain`
 for simple terminal output, or `--no-browser` to keep all browser steps manual.
 See [setup instructions](docs/setup.md).
 
+To join an existing network, choose the bundle folder made for this computer,
+such as `peer-bundles/Mitra`. A full path (including quoted paths with spaces)
+also works. Selecting the parent `peer-bundles` folder shows a machine picker.
+Incorrect answers prompt for corrections; bundle problems can be deferred,
+and Discord permission problems let you reselect the server/channel or finish
+that step later. Cloudflare name corrections keep the current account connection.
+
 UPS history now uses SQLite with automatic, non-destructive JSONL migration.
 See [UPS history storage](docs/ups-history.md). Maintainers can publish tested,
 versioned release packages through [the release workflow](docs/releases.md).
@@ -367,7 +374,7 @@ failures are logged and retried without advancing the stored public-IP baseline.
 5. Use commands:
    - `/about`
    - `/ip status`
-   - `/ip subscribe`
+   - `/alerts subscribe`
    - `/ups status`
    - `/power restart`, `/power shutdown`, `/power cancel` (admin role required)
    - `/update check`, `/update install`, `/update changelog` (or `/update changelong`), `/update status`, `/update auto`, `/update startup`, `/update interval`, `/update repo`, `/update dismiss` (admin role required)
@@ -388,7 +395,7 @@ Peer uptime monitoring adds persistent incidents, replicated history, subscriber
 outage/recovery alerts, and `/servers status` / `/servers dashboard` graphs.
 See [private network setup and limitations](docs/private-peer-network.md) and
 [uptime monitoring setup](docs/peer-uptime-monitoring.md). Alerts are opt-in through
-`/servers alerts`; members subscribe with `/servers subscribe`.
+`/servers alerts`; members subscribe with `/alerts subscribe`.
 Use `/servers doctor` to diagnose setup and `/servers alerts-test` to verify delivery.
 Planned work can use `/servers maintenance`; `/servers dashboard-pin` publishes an
 automatically refreshed shared dashboard, stopped with `/servers dashboard-stop`.

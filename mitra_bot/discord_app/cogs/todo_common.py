@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import embed as styled_embed
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,7 +14,7 @@ def now_iso() -> str:
 
 
 def clamp(text: str, n: int) -> str:
-    return text if len(text) <= n else text[: n - 1] + "..."
+    return text if len(text) <= n else text[: max(0, n - 3)] + "..."[:n]
 
 
 def status_emoji(status: str) -> str:
@@ -121,10 +122,10 @@ def assignee_mentions(item: TodoItem) -> str:
 
 
 def build_task_embed(item: TodoItem) -> discord.Embed:
-    embed = discord.Embed(
-        title=f"Task #{item.id}: {item.title}",
+    embed = styled_embed(
+        title=clamp(f"Task #{item.id}: {item.title}", 256),
         color=discord.Color.blurple(),
-        description=item.notes or "_No notes_",
+        description=clamp(item.notes, 4096) if item.notes else "No notes added yet.",
     )
     embed.add_field(
         name="Status",
@@ -133,5 +134,11 @@ def build_task_embed(item: TodoItem) -> discord.Embed:
     )
     embed.add_field(name="Assignees", value=assignee_mentions(item), inline=True)
     embed.add_field(name="Created By", value=f"<@{item.created_by}>", inline=True)
-    embed.add_field(name="Created At", value=item.created_at, inline=False)
+    try:
+        created = datetime.fromisoformat(item.created_at)
+        created = created if created.tzinfo else created.replace(tzinfo=timezone.utc)
+        when = f"<t:{int(created.timestamp())}:f>"
+    except (ValueError, OverflowError, OSError):
+        when = "Unknown"
+    embed.add_field(name="Created", value=when, inline=True)
     return embed

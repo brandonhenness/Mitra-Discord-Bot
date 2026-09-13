@@ -108,17 +108,18 @@ async def find_dashboard(channel, bot, marker):
 
 async def doctor(mesh, bot, guild):
     """Read-only checks: no messages, new settings, power operations or key contents."""
-    lines = [f"Instance: `{mesh.config.node_id}` · state owner: `{mesh.config.resolved_state_owner}`",
-             f"Discord: {'connected' if bot.is_ready() and bot.gateway_connected else 'disconnected'}"]
+    lines = [f"**Server** {mesh.config.node_id}\n**Shared settings owner** {mesh.config.resolved_state_owner}",
+             f"**Discord** {'🟢 Connected' if bot.is_ready() and bot.gateway_connected else '🔴 Disconnected'}"]
     tasks = mesh.monitor.tasks
     owner = mesh.config.resolved_state_owner
     owner_connected = bool(bot.is_ready() and bot.gateway_connected) if owner == mesh.config.node_id else bool(mesh.online.get(owner))
-    lines.append(f"State owner: {'available (latest local view)' if owner_connected else 'unavailable or not yet observed'}. "
-                 "Rolling updates, UPS configuration, channel settings and ToDo writes require this owner. "
+    lines.append(f"**Shared settings owner**\n{'🟢 Available (latest local view)' if owner_connected else '⚠️ Unavailable or not yet observed'}\n"
+                 "Rolling updates, UPS configuration, channel settings and ToDo changes require this server. "
                  "Monitoring, shared alerts, IP/about reads and targeted power/UPS status can use surviving nodes.")
-    lines.append("Application state is not automatically replicated or promoted. Restore the same owner identity from backup; "
-                 "never run two copies of that identity. See docs/operations-recovery.md.")
-    lines.append(f"Monitoring tasks running: {sum(not task.done() for task in tasks)}/{len(tasks)}")
+    lines.append("**Recovery information**\nApplication state is not automatically replicated or promoted. "
+                 "Restore the same owner identity from backup; never run two copies of that identity. "
+                 "[Recovery guide](https://github.com/brandonhenness/Mitra-Discord-Bot/blob/main/docs/operations-recovery.md)")
+    lines.append(f"**Monitoring tasks running** {sum(not task.done() for task in tasks)}/{len(tasks)}")
     for label, filename in (("Node certificate", mesh.config.cert_file), ("CA certificate", mesh.config.ca_file)):
         try:
             # Decode only the public certificate using the bundled OpenSSL binding.
@@ -149,10 +150,10 @@ async def doctor(mesh, bot, guild):
                 expiry = f" · certificate expires <t:{int(expires)}:R>" if expires else ""
                 if expires and expires-time.time() < 30*86400:
                     expiry += " (renew soon)"
-                return f"`{target}`: authenticated TLS OK · Discord {'connected' if health.discord_connected else 'disconnected'} · history {sync}{age}{expiry}"
+                return f"**🟢 {target} — Peer connection verified**\nAuthenticated TLS OK · Discord {'connected' if health.discord_connected else 'disconnected'}\nHistory {sync}{age}{expiry}"
             except (PeerError, ValueError) as exc:
                 cause = exc.__cause__ or exc
-                return f"`{target}`: check failed ({type(cause).__name__}); check reachability, membership, certificates and synchronized clocks."
+                return f"**⚠️ {target} — Peer check failed**\nReason: {type(cause).__name__}. Check reachability, membership, certificates and synchronized clocks."
     lines.extend(await asyncio.gather(*(check(peer) for peer in sorted(mesh.peers))))
     store = mesh.monitor.store
     pending = store.db.execute("SELECT count(*) FROM health_outbox WHERE delivered IS NULL").fetchone()[0]
@@ -164,7 +165,7 @@ async def doctor(mesh, bot, guild):
         lines.append(f"Shared dashboard: https://discord.com/channels/{guild.id}/{dashboard['channel']}/{dashboard.get('message_id')} · interval {dashboard['dashboard_interval']}s")
     setting = store.setting(guild.id,"*")
     if not setting or not setting["enabled"]:
-        lines.append("Alerts disabled or unconfigured: use /servers alerts.")
+        lines.append("**Alerts disabled or unconfigured**\nRun `/alerts setup` to choose where notifications are sent.")
     else:
         try:
             channel = bot.get_channel(setting["channel"]) or await bot.fetch_channel(setting["channel"])
@@ -188,7 +189,7 @@ async def doctor(mesh, bot, guild):
                     state = "role grants access or is Mitra's admin role; choose a dedicated subscriber role"
                 else:
                     state = "role present and mentionable by bot"
-                lines.append(f"`{value['subject']}` subscriptions: {state}")
+                lines.append(f"**Alert subscriptions**\n{state}")
         except (ValueError,discord.HTTPException) as exc:
             lines.append(f"Alert destination: {exc}")
     return lines

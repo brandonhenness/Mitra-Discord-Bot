@@ -1,5 +1,6 @@
 # mitra_bot/discord_app/bot_factory.py
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import notice
 
 import logging
 import os
@@ -52,7 +53,7 @@ class MitraBot(discord.Bot):
             return
         if not fallback and not self.owns_application_state:
             await interaction.followup.send(
-                f"This command belongs to `{preferred}`, which did not accept it. Its application state is not replicated; no change was made.",
+                notice('Shared settings owner unavailable', f"This command belongs to `{preferred}`, which did not accept it. Its application state is not replicated; no change was made.", tone='info'),
                 ephemeral=True,
             )
             return

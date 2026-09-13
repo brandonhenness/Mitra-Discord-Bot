@@ -1,3 +1,5 @@
+from mitra_bot.discord_app.message_style import embed as styled_embed
+from mitra_bot.discord_app.message_style import notice
 
 import platform
 import time
@@ -28,11 +30,11 @@ class AboutCog(commands.Cog):
             try:
                 nodes = selected_nodes(self.bot, server, default_all=True)
             except PeerError as exc:
-                await ctx.respond(str(exc), ephemeral=True)
+                await ctx.respond(notice('Bot information unavailable', str(exc), tone='error'), ephemeral=True)
                 return
             results = await read_nodes(self.bot, nodes, "node_info")
             for start in range(0, len(results), 8):
-                embed = discord.Embed(title="Mitra Bot · network", color=discord.Color.blurple())
+                embed = styled_embed(title="Mitra Bot · network", color=discord.Color.blurple())
                 for node, data in results[start:start+8]:
                     value = "Unavailable: check connectivity and node version."
                     if data and data.get("error"):
@@ -51,10 +53,10 @@ class AboutCog(commands.Cog):
         try:
             selected_nodes(self.bot, server, default_all=True)
         except PeerError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('Bot information unavailable', str(exc), tone='error'), ephemeral=True)
             return
         now = int(time.time())
-        embed = discord.Embed(
+        embed = styled_embed(
             title="Mitra Bot",
             description="Operations helper bot for monitoring, power controls, and utility workflows.\n\n" + POLICY_LINKS,
             color=discord.Color.blurple(),

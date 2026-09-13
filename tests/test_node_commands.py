@@ -115,6 +115,7 @@ def test_ip_all_retains_success_when_another_node_is_unavailable():
             await IPCog.status.callback(IPCog(bot), ctx, "all")
         message = ctx.respond.call_args.args[0]
         assert "mitra" in message and "203.0.113.1" in message
+        assert "```\n203.0.113.1\n```" in message
         assert "test" in message and "Unavailable" in message
     asyncio.run(run())
 
