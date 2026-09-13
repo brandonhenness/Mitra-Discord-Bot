@@ -50,9 +50,11 @@ Messages and Send Messages in Threads. Use Discord channel/category permissions
 to control who can see shared boards and the hub.
 
 Mitra needs View Channels, Send Messages, Embed Links, Read Message History,
-Manage Channels, Create Public Threads and Send Messages in Threads for these
-workflows. Public to-do use does not require Administrator or Manage Roles.
+Manage Channels, Create Public Threads, Send Messages in Threads, and Manage
+Threads for these workflows. Manage Threads allows removing thread memberships
+when members are unassigned. Public to-do use does not require Administrator or Manage Roles.
 Use server installation with the `bot` and `applications.commands` scopes.
+See the [public invite and permission checklist](discord-install.md).
 
 Lists are keyed by Discord's globally unique channel IDs with an owning guild
 ID. Guild queries exclude other owners and unowned legacy records. Task reads
