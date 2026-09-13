@@ -207,6 +207,21 @@ def test_paginated_domains_and_error_redaction(monkeypatch, caplog):
     assert "SECRET" not in str(error.value)+caplog.text
 
 
+def test_setup_corrects_label_token_and_record_names_without_reconnecting(local_config, monkeypatch):
+    service = Mock()
+    service.get_zones.return_value = [dict(id="zone1", name="henness.info")]
+    service.get_dns_records.return_value = [dict(id="root", type="A", name="henness.info")]
+    monkeypatch.setattr(cloudflare_setup, "CloudflareService", Mock(return_value=service))
+    monkeypatch.setattr(cloudflare_setup.getpass, "getpass", Mock(side_effect=["bad", "synthetic-token-" + "x" * 25]))
+    replies = iter(["Bad Label", "home", "9", "2", "1", "invalid name", "@", "y"])
+    monkeypatch.setattr("builtins.input", lambda _: next(replies))
+    assert cloudflare_setup.configure_cloudflare(open_browser=False)
+    service.get_zones.assert_called_once()
+    service.get_dns_records.assert_called_once_with("zone1")
+    service.create_dns_record.assert_not_called()
+    assert read_config_dict()["cloudflare"]["targets"][0]["record_ids"] == ["root"]
+
+
 def test_browser_callback_exchanges_code_with_its_pkce_verifier(monkeypatch):
     opened = []
     monkeypatch.setattr(auth.webbrowser, "open", opened.append)

@@ -15,7 +15,7 @@ from mitra_bot.peer_config import load_peer_config
 from mitra_bot.services.cloudflare_auth import DEFAULT_CLIENT_ID, authorize, save_profile
 from mitra_bot.services.cloudflare_service import CloudflareService
 from mitra_bot.services.ip_service import get_public_ip
-from mitra_bot.setup_wizard import choose, save_token, yes
+from mitra_bot.setup_wizard import choose, menu, save_token, yes
 from mitra_bot.storage.config_store import read_config_dict, write_config_dict
 
 TOKEN_PAGE = "https://dash.cloudflare.com/profile/api-tokens"
@@ -57,10 +57,13 @@ def configure_cloudflare(*, env_file=".env", open_browser=True, client_id=None, 
     node_id = peer.node_id if peer.enabled else "local"
     ui.message(f"Cloudflare setup for server {node_id}. Each assigned A record will track this machine's public IPv4.")
     ui.message("Run setup separately on each server/account. Stop this bot while changing credentials or assignments.")
-    profile = ui.ask("Connection name (for example home or pryor): ").strip()
-    if not re.fullmatch(r"[a-z][a-z0-9_]{0,23}", profile):
-        raise ValueError("Use a connection name starting with a lowercase letter, with up to 24 lowercase letters, numbers or underscores")
-    mode = auth_method or ui.ask("Authentication: 1. Connect in browser  2. Manual API token [1]: ").strip() or "1"
+    ui.message("Give this Cloudflare account connection a short label so you can recognize it later, such as home or pryor.")
+    while True:
+        profile = ui.ask("Connection label (for example home or pryor): ").strip()
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,23}", profile):
+            break
+        ui.message("Start with a lowercase letter. Use only lowercase letters, numbers or underscores, up to 24 characters. Please try again.")
+    mode = auth_method or menu("1. Sign in to Cloudflare in your browser  2. Paste an API token manually", ("1", "2"), "1")
     oauth = None
     variable = "CLOUDFLARE_"+profile.upper()+"_API_TOKEN"
     if mode == "1":
@@ -78,9 +81,11 @@ def configure_cloudflare(*, env_file=".env", open_browser=True, client_id=None, 
         ui.message(TOKEN_PAGE)
         if open_browser:
             webbrowser.open(TOKEN_PAGE)
-        token = ui.secret("Cloudflare API token (hidden): ").strip()
-        if not re.fullmatch(r"[A-Za-z0-9_.-]{20,256}", token):
-            raise ValueError("Invalid token format")
+        while True:
+            token = ui.secret("Cloudflare API token (hidden): ").strip()
+            if re.fullmatch(r"[A-Za-z0-9_.-]{20,256}", token):
+                break
+            ui.message("That does not look like an API token. Copy only the token value and paste it again; input is hidden.")
     elif mode != "1":
         raise ValueError("Unknown authentication option")
     service = CloudflareService(api_token=token)
@@ -95,8 +100,26 @@ def configure_cloudflare(*, env_file=".env", open_browser=True, client_id=None, 
             break
         existing = ui.run("Loading DNS records", service.get_dns_records, zone["id"])
         ui.message("Existing A records: "+", ".join(r["name"] for r in existing if r["type"] == "A"))
-        values = ui.ask("Names to update, comma separated (@ for root, e.g. @, pq): ").split(",")
-        planned = plan_records(zone, [v.strip() for v in values if v.strip()], existing)
+        ui.message(f"Use @ for {zone['name']}, or names such as mitra, pq. Separate names with commas. Full names also work.")
+        while True:
+            values = ui.ask("Names to update (blank skips this domain): ").strip()
+            if not values:
+                planned = None
+                break
+            try:
+                planned = plan_records(zone, [v.strip() for v in values.split(",") if v.strip()], existing)
+                assigned_elsewhere = {record for target in cfg["cloudflare"].get("targets") or []
+                                      if target["zone_id"] == zone["id"] and target.get("node_id", "local") not in {node_id, "local"}
+                                      for record in target["record_ids"]}
+                if any(record and record["id"] in assigned_elsewhere for _, record in planned):
+                    raise ValueError("One of these names is assigned to another machine. Choose different names, or fix the saved assignment before retrying.")
+                break
+            except ValueError as exc:
+                ui.message(str(exc))
+                ui.message("Enter corrected names below. Your account connection and earlier domain selections are retained.")
+        if planned is None:
+            zones = [z for z in zones if z["id"] != zone["id"]]
+            continue
         plans.append((zone, planned))
         zones = [z for z in zones if z["id"] != zone["id"]]
         if not zones or not yes("Add another domain from this account/connection?", False):

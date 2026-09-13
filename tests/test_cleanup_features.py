@@ -197,9 +197,9 @@ def test_invalid_token_does_not_replace_existing_secret(monkeypatch, tmp_path):
     original = 'DISCORD_APPLICATION_TOKEN='+'x'*40+'\n'
     (tmp_path/'.env').write_text(original)
     monkeypatch.setattr('builtins.input', lambda _: 'y')
-    monkeypatch.setattr(setup_wizard.getpass, 'getpass', lambda _: 'invalid')
+    monkeypatch.setattr(setup_wizard.getpass, 'getpass', Mock(side_effect=['invalid', KeyboardInterrupt]))
     monkeypatch.setattr(setup_wizard.DiscordSetup, 'application', Mock(side_effect=RuntimeError('HTTP 401')))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(KeyboardInterrupt):
         setup_wizard.guided_setup(open_browser=False)
     assert (tmp_path/'.env').read_text() == original
 
