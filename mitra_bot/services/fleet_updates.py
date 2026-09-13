@@ -95,6 +95,9 @@ class FleetUpdates:
                 if not self.bot.is_ready():
                     await self.bot.wait_until_ready()
                 channel = self.bot.get_channel(plan["channel"]) or await self.bot.fetch_channel(plan["channel"])
+                from mitra_bot.discord_app.access import infrastructure_channel
+                if not infrastructure_channel(self.bot, channel):
+                    return
                 content = self.progress_text(plan)
                 if plan.get("message"):
                     await channel.get_partial_message(plan["message"]).edit(content=content, allowed_mentions=discord.AllowedMentions.none())

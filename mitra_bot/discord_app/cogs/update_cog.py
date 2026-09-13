@@ -11,6 +11,7 @@ import discord
 from discord.ext import commands
 
 from mitra_bot.discord_app.checks import ensure_admin
+from mitra_bot.discord_app.access import infrastructure_guild, infrastructure_channel
 from mitra_bot.services.alert_roles import shared_role
 from mitra_bot.discord_app.command_errors import report_command_error
 from mitra_bot.services.update_service import (
@@ -52,7 +53,7 @@ class UpdatePromptView(discord.ui.View):
     def _is_admin_user(self, interaction: discord.Interaction) -> bool:
         guild = interaction.guild
         user = interaction.user
-        if guild is None or not isinstance(user, discord.Member):
+        if not infrastructure_guild(interaction.client, guild) or not isinstance(user, discord.Member):
             return False
 
         role_name = getattr(
@@ -187,6 +188,8 @@ class UpdateCog(commands.Cog):
     async def _find_announce_channel(self) -> Optional[discord.abc.Messageable]:
         channel_map = get_notification_channel_map()
         for guild in self.bot.guilds:
+            if not infrastructure_guild(self.bot, guild):
+                continue
             per_guild = channel_map.get(guild.id)
             if not per_guild:
                 continue
@@ -196,7 +199,7 @@ class UpdateCog(commands.Cog):
                     ch = await self.bot.fetch_channel(per_guild)
                 except Exception:
                     continue
-            if isinstance(ch, (discord.TextChannel, discord.Thread)):
+            if isinstance(ch, (discord.TextChannel, discord.Thread)) and infrastructure_channel(self.bot, ch):
                 return ch
 
         legacy_channel_id = getattr(
@@ -209,7 +212,7 @@ class UpdateCog(commands.Cog):
                     ch = await self.bot.fetch_channel(int(legacy_channel_id))
                 except Exception:
                     return None
-            if isinstance(ch, (discord.TextChannel, discord.Thread)):
+            if isinstance(ch, (discord.TextChannel, discord.Thread)) and infrastructure_channel(self.bot, ch):
                 return ch
         return None
 

@@ -11,6 +11,7 @@ import discord
 from discord.ext import commands
 
 from mitra_bot.discord_app.checks import ensure_admin
+from mitra_bot.discord_app.access import infrastructure_guild
 from mitra_bot.discord_app.server_target import resolve_server
 from mitra_bot.services.peer_service import PeerError, PowerRequest
 from mitra_bot.discord_app.peer_power import operation_id, send_power_prompt
@@ -56,7 +57,7 @@ class PowerActionView(discord.ui.View):
     def _is_admin_user(self, interaction: discord.Interaction) -> bool:
         guild = interaction.guild
         user = interaction.user
-        if guild is None or not isinstance(user, discord.Member):
+        if not infrastructure_guild(interaction.client, guild) or not isinstance(user, discord.Member):
             return False
 
         role_name = getattr(

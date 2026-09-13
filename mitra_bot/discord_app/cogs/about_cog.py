@@ -10,6 +10,7 @@ from discord.ext import commands
 from mitra_bot import __version__
 from mitra_bot.discord_app.node_commands import selected_nodes, read_nodes
 from mitra_bot.services.peer_service import PeerError
+from mitra_bot.discord_app.access import infrastructure_guild
 
 POLICY_LINKS = (
     "[Terms of Service](https://github.com/brandonhenness/Mitra-Discord-Bot/blob/main/TERMS_OF_SERVICE.md) · "
@@ -25,6 +26,14 @@ class AboutCog(commands.Cog):
     @discord.slash_command(name="about", description="Show bot info and runtime details.")
     async def about(self, ctx: discord.ApplicationContext,
                     server: str = discord.Option(str, description="Server ID or all (default: all servers)", required=False, default=None)) -> None:
+        if not infrastructure_guild(self.bot, ctx.guild):
+            await ctx.respond(embed=styled_embed(
+                title="Mitra Bot",
+                description="Shared to-do lists and task threads for your Discord server.\n"
+                    "Use `/todo list_create` to get started (Manage Channels required). "
+                    "Lists and task history belong to this server.\n\n" + POLICY_LINKS,
+            ), ephemeral=True)
+            return
         await ctx.defer(ephemeral=True)
         if getattr(self.bot, "peer_service", None):
             try:

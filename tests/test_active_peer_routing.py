@@ -40,6 +40,7 @@ class AckServer:
             responded = True
 
         return SimpleNamespace(
+            guild=SimpleNamespace(id=3),
             id=interaction_id, created_at=datetime.now(timezone.utc),
             type=discord.InteractionType.component if component else discord.InteractionType.application_command,
             data=data or {"name": "servers", "options": [{"name": "list", "type": 1}]},
@@ -52,6 +53,8 @@ def test_only_ack_winner_invokes_command_across_three_instances():
     async def run():
         arbiter = AckServer()
         bots = [MitraBot(intents=discord.Intents.none()) for _ in "abc"]
+        for bot in bots:
+            bot.state = SimpleNamespace(infrastructure_guild_ids=(3,))
         for node, bot in zip("abc", bots):
             bot.peer_service = peer(node)
         ran = []
@@ -90,6 +93,7 @@ def test_expired_interaction_does_not_attempt_ack():
 def test_survivor_handles_monitoring_but_does_not_write_missing_owners_state():
     async def run():
         bot = MitraBot(intents=discord.Intents.none())
+        bot.state = SimpleNamespace(infrastructure_guild_ids=(3,))
         bot.peer_service = peer("b")
         parent = AsyncMock()
         arbiter = AckServer()
@@ -152,7 +156,7 @@ def test_signed_confirmation_survives_origin_loss_and_routes_to_original_target(
         a, c = peer("a"), peer("c")
         c.power = AsyncMock(return_value="scheduled")
         event = confirmation(c, signer=a)
-        bot = SimpleNamespace(peer_service=c, state=SimpleNamespace(admin_role_name="Mitra Admin"))
+        bot = SimpleNamespace(peer_service=c, state=SimpleNamespace(admin_role_name="Mitra Admin", infrastructure_guild_ids=(3,)))
         with patch("mitra_bot.discord_app.peer_power.response_delay", return_value=0):
             await handle_power_component(bot, event)
         args = c.power.call_args
@@ -198,7 +202,7 @@ def test_signed_confirmation_admin_denial_has_no_power_effect():
         mesh.power = AsyncMock()
         event = confirmation(mesh)
         event.user.roles = []
-        bot = SimpleNamespace(peer_service=mesh, state=SimpleNamespace(admin_role_name="Mitra Admin"))
+        bot = SimpleNamespace(peer_service=mesh, state=SimpleNamespace(admin_role_name="Mitra Admin", infrastructure_guild_ids=(3,)))
         with patch("mitra_bot.discord_app.peer_power.response_delay", return_value=0):
             await handle_power_component(bot, event)
         mesh.power.assert_not_awaited()
