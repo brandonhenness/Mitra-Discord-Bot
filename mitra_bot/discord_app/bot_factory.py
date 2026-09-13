@@ -39,7 +39,13 @@ class MitraBot(discord.Bot):
         )
 
     async def process_application_commands(self, interaction, auto_sync=None):
+        if interaction.type not in (discord.InteractionType.application_command, discord.InteractionType.auto_complete):
+            # Components and modals perform their own context checks. They have no command name.
+            return
         if not command_allowed(self, interaction.guild, (interaction.data or {}).get("name", "")):
+            if self.peer_service and not self.owns_application_state:
+                # A peer with an outdated allowlist must not consume the owner's interaction.
+                return
             if interaction.type == discord.InteractionType.auto_complete:
                 await interaction.response.send_autocomplete_result([])
             elif await claim_interaction(interaction, delay=0, ephemeral=True):
