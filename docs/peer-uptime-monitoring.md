@@ -13,8 +13,7 @@ changes, every node's outage/recovery alerts, and automatic update announcements
 1. As a Mitra administrator, run `/alerts setup channel:#mitra` once per guild.
    `/servers alerts channel:#mitra` is the peer-network alias.
 2. Members run `/alerts subscribe` or `/alerts unsubscribe` for all alerts.
-   `/ip subscribe`, `/ip unsubscribe`, `/servers subscribe`, and
-   `/servers unsubscribe` are aliases; server selection is no longer needed.
+   Subscriptions are managed only through `/alerts`; no server selection is needed.
    Mitra administrators may supply `user:` on `/alerts subscribe` or
    `/alerts unsubscribe` to manage another member, for example
    `/alerts subscribe user:@Alex`. Supplying `user:` always requires the configured

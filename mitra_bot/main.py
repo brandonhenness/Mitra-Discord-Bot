@@ -1,5 +1,6 @@
 # mitra_bot/main.py
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import embed as styled_embed
 
 import asyncio
 import logging
@@ -72,7 +73,7 @@ async def main_async() -> None:
         async def deliver_notification(source, notification):
             if not bot.is_ready():
                 raise RuntimeError("This node has not connected to Discord yet")
-            message = f"[{source}] {notification.message}"
+            message = f"{notification.message}\n\n*Reported by {source}*"
             if notification.channel_id:
                 channel = bot.get_channel(notification.channel_id) or await bot.fetch_channel(notification.channel_id)
                 if notification.mention_ip_subscribers and getattr(channel, "guild", None):
@@ -262,15 +263,14 @@ async def main_async() -> None:
 
                     if isinstance(channel, (discord.TextChannel, discord.Thread)):
                         msg = await channel.fetch_message(int(message_id))
-                        embed = discord.Embed(
-                            title="Restart Completed",
+                        embed = styled_embed(
+                            title="Server restart complete",
                             description="Server restart finished and bot is online.",
                             color=discord.Color.green(),
                         )
                         embed.add_field(name="Action", value="`restart`", inline=True)
-                        embed.add_field(name="Mode", value=f"`{mode}`", inline=True)
-                        embed.add_field(name="Delay", value=f"`{delay}` sec", inline=True)
-                        embed.add_field(name="Force", value=f"`{force}`", inline=True)
+                        embed.add_field(name="Delay", value=f"{delay} seconds", inline=True)
+                        embed.add_field(name="Force apps to close", value="Yes" if force else "No", inline=True)
                         if requester:
                             embed.add_field(
                                 name="Requested By",

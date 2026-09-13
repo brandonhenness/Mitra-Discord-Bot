@@ -29,8 +29,8 @@ requiring a majority vote to report an observation.
 | `/servers status server:server-a hours:24` | Health card and attached history graph, similar to `/ups status`. |
 | `/servers dashboard hours:24` | All-server summary and availability timelines, paginated for larger meshes. |
 | `/servers incidents server:server-a` | Observed outages/recoveries with observer and timestamps. |
-| `/servers subscribe server:server-a` | Add the invoking member's server-specific alert role. |
-| `/servers unsubscribe server:server-a` | Remove that role. |
+| `/alerts subscribe` | Subscribe the member to all operational alerts. |
+| `/alerts unsubscribe` | Unsubscribe the member from operational alerts. |
 | `/servers alerts channel:<channel>` | Admin sets this guild's alert destination. |
 | `/servers monitoring ...` | Admin configures thresholds, intervals and retention. |
 

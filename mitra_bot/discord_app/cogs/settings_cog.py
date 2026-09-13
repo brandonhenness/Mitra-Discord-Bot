@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import notice
 
 import discord
 from discord.ext import commands
@@ -56,7 +57,7 @@ class SettingsCog(commands.Cog):
             await admin_guard
             return
         if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            await ctx.respond(notice('Use this command in Discord', "This command can only be used in a server.", tone='warning'), ephemeral=True)
             return
 
         setting = NotificationChannelSetting(
@@ -65,7 +66,7 @@ class SettingsCog(commands.Cog):
         )
         set_notification_channel_id_for_guild(setting.guild_id, setting.channel_id)
         await ctx.respond(
-            f"Notification channel set to {channel.mention} for this server.",
+            notice('Notification channel saved', f"Notification channel set to {channel.mention} for this server.", tone='success'),
             ephemeral=True,
         )
 
@@ -75,19 +76,19 @@ class SettingsCog(commands.Cog):
     )
     async def channel_show(self, ctx: discord.ApplicationContext) -> None:
         if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            await ctx.respond(notice('Use this command in Discord', "This command can only be used in a server.", tone='warning'), ephemeral=True)
             return
 
         scope = GuildScope(guild_id=ctx.guild.id)
         channel_id = get_notification_channel_id_for_guild(scope.guild_id)
         if not channel_id:
             await ctx.respond(
-                "No notification channel is configured for this server.",
+                notice('Choose a notification channel', "No notification channel is configured for this server.", tone='info'),
                 ephemeral=True,
             )
             return
         await ctx.respond(
-            f"Notification channel for this server is <#{channel_id}>.",
+            notice('Notification settings', f"Notification channel for this server is <#{channel_id}>.", tone='info'),
             ephemeral=True,
         )
 
@@ -101,13 +102,13 @@ class SettingsCog(commands.Cog):
             await admin_guard
             return
         if ctx.guild is None:
-            await ctx.respond("This command can only be used in a server.", ephemeral=True)
+            await ctx.respond(notice('Use this command in Discord', "This command can only be used in a server.", tone='warning'), ephemeral=True)
             return
 
         scope = GuildScope(guild_id=ctx.guild.id)
         clear_notification_channel_id_for_guild(scope.guild_id)
         await ctx.respond(
-            "Cleared this server's notification channel setting.",
+            notice('Notification channel cleared', "Cleared this server's notification channel setting.", tone='success'),
             ephemeral=True,
         )
 
