@@ -78,7 +78,7 @@ def test_private_command_is_denied_before_peer_routing_or_handler(monkeypatch, p
     async def run():
         bot = MitraBot(intents=discord.Intents.none())
         bot.state = bot_state(1)
-        bot.peer_service = SimpleNamespace() if peer else None
+        bot.peer_service = SimpleNamespace(is_state_owner=True) if peer else None
         parent = AsyncMock()
         monkeypatch.setattr(discord.Bot, "process_application_commands", parent)
         event = SimpleNamespace(guild=SimpleNamespace(id=2), data={"name": "power"}, id=1,

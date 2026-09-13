@@ -24,6 +24,25 @@ class ServersCog(commands.Cog):
 
     servers = discord.SlashCommandGroup("servers", "Private network servers")
 
+    @servers.command(name="sync-access", description="Replace one peer's trusted Discord servers with the owner's allowlist")
+    async def sync_access(self, ctx: discord.ApplicationContext,
+                          server: discord.Option(str, "Peer whose infrastructure allowlist will be replaced")):
+        mesh = await self._mesh(ctx)
+        if not mesh:
+            return
+        await ctx.defer(ephemeral=True)
+        from mitra_bot.services.access_sync import sync_peer_access
+        try:
+            ids = await sync_peer_access(self.bot, server)
+            await ctx.respond(notice('Infrastructure access synchronized',
+                f"{server}: saved and applied the owner's trusted Discord server IDs: "
+                + (", ".join(str(value) for value in ids) or "none")
+                + ". No restart is required.", tone='success'), ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none())
+        except (PeerError, ValueError, OSError) as exc:
+            await ctx.respond(notice('Access synchronization not confirmed', str(exc), tone='warning'), ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none())
+
     @servers.command(name="doctor", description="Check connectivity, certificates, replication and alert permissions")
     async def doctor_command(self, ctx: discord.ApplicationContext):
         mesh = await self._mesh(ctx)

@@ -45,6 +45,11 @@ async def main_async() -> None:
     bot = create_bot(state=state)
 
     peer_config = load_peer_config()
+    from mitra_bot import __version__
+    from mitra_bot.storage.config_store import get_config_path
+    logging.info("Startup: version=%s config=%s infrastructure_guild_ids=%s node=%s state_owner=%s",
+                 __version__, get_config_path().resolve(), list(settings.infrastructure_guild_ids),
+                 peer_config.node_id, peer_config.resolved_state_owner)
     peer_service = None
     if peer_config.enabled:
         ups_cog = bot.get_cog("UPSCog")
@@ -68,6 +73,8 @@ async def main_async() -> None:
         bot.peer_service = peer_service
         from mitra_bot.discord_app.node_commands import local_operation
         peer_service.node_rpc = lambda operation, payload: local_operation(bot, operation, payload)
+        from mitra_bot.services.access_sync import apply_peer_access
+        peer_service.access_rpc = lambda payload: apply_peer_access(bot, payload)
         peer_service.configure_discord_identity(settings.token)
         peer_service.health_provider = lambda: {"discord_connected": bot.gateway_connected}
         bot.auto_sync_commands = peer_service.is_state_owner
@@ -367,6 +374,9 @@ def main() -> None:
         asyncio.run(main_async())
     except KeyboardInterrupt:
         pass
+    except Exception:
+        logging.exception("Bot startup or runtime failed")
+        raise
 
 
 if __name__ == "__main__":

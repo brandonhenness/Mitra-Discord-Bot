@@ -1,5 +1,37 @@
 # Public access and private infrastructure
 
+## Repairing a peer without desktop access
+
+Releases supporting `/servers sync-access` can copy the configured settings owner's
+effective infrastructure allowlist to one named peer. Update both nodes first,
+then run `/servers sync-access server:Anubis` in an already authorized Discord
+server as a Mitra administrator (substitute your peer's name).
+
+This explicitly replaces only the target's `bot.infrastructure_guild_ids`, saves
+it to the target's active config file, and applies it immediately. It does not
+copy tokens, Cloudflare assignments, UPS settings, todo data, or the state-owner
+identity. No restart or automatic ongoing synchronization is involved. Changes
+to the owner's allowlist later require another explicit sync or a local edit.
+Only the configured owner can send this operation over the certificate-pinned,
+mutually authenticated peer connection. A public server's administrator role
+does not grant permission to change this setting.
+
+If Discord commands cannot be used, run the following from the owner's bot
+installation directory, using the same environment/configuration as its bot:
+
+```powershell
+& .\.venv\Scripts\python.exe -m mitra_bot.sync_access Anubis
+```
+
+This makes an outbound request using the existing peer credentials; it does not
+start a second bot or bind the peer listener. The target must be running the new
+release and reachable. Older targets report that an update is required.
+
+Afterward, `/servers doctor` checks connectivity and `/ip status server:Anubis`
+can verify infrastructure use from the trusted server. Public servers must still
+have only `/about` and `/todo` available. The startup log now records the active
+config path, version, allowlist, node and owner, and logs startup exceptions.
+
 One bot identity can serve public Discord servers while retaining private
 infrastructure features. Authorization has two layers: the operator authorizes
 a Discord server locally, then existing command-specific role checks authorize
