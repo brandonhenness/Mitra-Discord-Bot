@@ -57,7 +57,7 @@ class Envelope(BaseModel):
     request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
     issued_at: int
     application_key: str = ""
-    operation: Literal["snapshot", "power", "health", "notify", "history", "monitor_settings", "update_status", "update_install", "node_info", "public_ip", "ups_settings", "capabilities"]
+    operation: Literal["snapshot", "power", "health", "notify", "history", "monitor_settings", "update_status", "update_install", "node_info", "public_ip", "ups_settings", "capabilities", "infrastructure_access"]
     payload: dict[str, Any]
 
 
@@ -260,7 +260,17 @@ class PeerService:
             from mitra_bot import __version__
             return {"version": __version__, "operations": ["health", "snapshot", "power", "history"]
                     + (["node_info", "public_ip", "ups_settings"] if getattr(self, "node_rpc", None) else [])
-                    + (["update_status", "update_install"] if getattr(self, "update_rpc", None) else [])}
+                    + (["update_status", "update_install"] if getattr(self, "update_rpc", None) else [])
+                    + (["infrastructure_access"] if getattr(self, "access_rpc", None) and not self.is_state_owner else [])}
+        if msg.operation == "infrastructure_access":
+            if self.is_state_owner or peer.node_id != self.config.resolved_state_owner:
+                raise PeerError("Only the configured state owner may change a remote infrastructure allowlist")
+            handler = getattr(self, "access_rpc", None)
+            if handler is None:
+                raise PeerError("Access synchronization is unavailable; update this node")
+            result = handler(msg.payload)
+            logging.info("Infrastructure access synchronized from configured owner %s", peer.node_id)
+            return result
         if msg.operation in {"node_info", "public_ip", "ups_settings"}:
             if msg.operation == "ups_settings" and peer.node_id != self.config.resolved_state_owner:
                 raise PeerError("Only the configured state owner may change remote UPS settings")

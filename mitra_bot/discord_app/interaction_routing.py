@@ -17,6 +17,8 @@ def command_route(data: dict, mesh) -> tuple[str, bool]:
         path.append(options[0]["name"])
         options = options[0].get("options", [])
     target = next((o.get("value") for o in options if o.get("name") == "server"), None)
+    if path[:2] == ["servers", "sync-access"]:
+        return mesh.config.resolved_state_owner, False
     if path[0] == "power" or path[:2] == ["ups", "status"]:
         return str(target or mesh.config.resolved_state_owner), True
     if path[0] in {"servers", "alerts", "about"} or path[:2] == ["ip", "status"]:
