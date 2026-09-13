@@ -10,6 +10,7 @@ from typing import Any
 import discord
 from mitra_bot.discord_app.command_errors import report_command_error
 from mitra_bot.discord_app.bot_factory import AppState, create_bot
+from mitra_bot.discord_app.access import infrastructure_guild, infrastructure_channel
 from mitra_bot.logging_setup import setup_logging
 from mitra_bot.storage.storage_schema import RestartNoticeRuntimeModel
 from mitra_bot.storage.storage_store import (
@@ -38,6 +39,7 @@ async def main_async() -> None:
         channel_id=settings.channel_id,
         admin_role_name=settings.admin_role_name,
         ip_subscriber_role_name=settings.ip_subscriber_role_name,
+        infrastructure_guild_ids=settings.infrastructure_guild_ids,
     )
 
     bot = create_bot(state=state)
@@ -76,6 +78,8 @@ async def main_async() -> None:
             message = f"{notification.message}\n\n*Reported by {source}*"
             if notification.channel_id:
                 channel = bot.get_channel(notification.channel_id) or await bot.fetch_channel(notification.channel_id)
+                if not infrastructure_channel(bot, channel):
+                    raise ValueError("Infrastructure notifications require an authorized Discord server")
                 if notification.mention_ip_subscribers and getattr(channel, "guild", None):
                     role = shared_role(channel.guild) or discord.utils.get(channel.guild.roles, name=settings.ip_subscriber_role_name)
                     if role:
@@ -84,8 +88,7 @@ async def main_async() -> None:
                         message = f"{role.mention}\n{message}"
                 await channel.send(message)
             elif notification.user_id:
-                user = await bot.fetch_user(notification.user_id)
-                await user.send(message)
+                raise ValueError("Infrastructure notifications cannot be delivered to unscoped DMs")
             else:
                 raise ValueError("A notification requires a destination")
 
@@ -212,10 +215,14 @@ async def main_async() -> None:
                 "Enable Server Members Intent in Discord portal and set MITRA_ENABLE_MEMBERS_INTENT=true."
             )
 
-        # Ensure roles exist in every guild the bot is in
+        # Infrastructure roles are only provisioned in operator-authorized guilds.
         if bot.owns_application_state:
             for guild in bot.guilds:
-                await ensure_role(guild, settings.admin_role_name)
+                if infrastructure_guild(bot, guild):
+                    await ensure_role(guild, settings.admin_role_name)
+
+            # Also remove stale guild commands after a guild is removed from the allowlist.
+            await bot.sync_commands(check_guilds=[guild.id for guild in bot.guilds])
 
         logging.info(
             "Starting tasks: ip_monitor=%ss ups_monitor=%ss update_monitor=%ss",
@@ -261,7 +268,7 @@ async def main_async() -> None:
                     if channel is None:
                         channel = await bot.fetch_channel(int(channel_id))
 
-                    if isinstance(channel, (discord.TextChannel, discord.Thread)):
+                    if isinstance(channel, (discord.TextChannel, discord.Thread)) and infrastructure_channel(bot, channel):
                         msg = await channel.fetch_message(int(message_id))
                         embed = styled_embed(
                             title="Server restart complete",

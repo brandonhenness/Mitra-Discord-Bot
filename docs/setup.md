@@ -1,5 +1,9 @@
 # Guided and manual setup
 
+To invite the hosted bot, use the [user guide](../README.md#get-started).
+This page is for running your own installation with your own Discord application.
+See [self-hosting and operations](self-hosting.md) for configuration and maintenance.
+
 Install Python 3.10+ or [uv](https://docs.astral.sh/uv/getting-started/installation/).
 Extract the `mitra-discord-bot-VERSION.zip` release asset into a permanent folder.
 On Windows, double-click `Setup-MitraBot.cmd` or run
@@ -23,6 +27,9 @@ asks for a bot token using hidden input, validates it before replacing `.env`,
 opens the Server Members Intent settings and builds the bot installation URL.
 It requests view/send messages, embed links, attach files, read message history,
 manage roles and pin messages. It does not request Administrator.
+For to-do lists, also grant Manage Channels, Create Public Threads, Send Messages
+in Threads, and Manage Threads. The hosted public bot uses a smaller set without
+infrastructure permissions; see the [invite checklist](discord-install.md).
 
 Discord's [supported application setup](https://docs.discord.com/developers/quick-start/getting-started)
 requires creating the application in the Developer Portal. The wizard cannot

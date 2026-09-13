@@ -1,6 +1,7 @@
 """One permissionless subscription role for all Mitra operational alerts."""
 from mitra_bot.discord_app.message_style import notice
 import discord
+from mitra_bot.discord_app.access import infrastructure_guild
 
 ALERT_ROLE = "Mitra Alerts"
 
@@ -30,6 +31,8 @@ def legacy_roles(bot, guild, roles=None):
 
 
 async def configure_shared_role(bot, guild):
+    if not infrastructure_guild(bot, guild):
+        raise ValueError("Infrastructure alerts are not available in this Discord server")
     roles = await guild.fetch_roles()
     matches = [r for r in roles if r.name == ALERT_ROLE]
     if len(matches) > 1:
@@ -58,6 +61,9 @@ async def configure_shared_role(bot, guild):
 
 
 async def subscription(ctx, subscribe, user=None):
+    if not infrastructure_guild(ctx.bot, ctx.guild):
+        await ctx.respond(notice('Command unavailable', 'Infrastructure alerts are not available in this Discord server.', tone='warning'), ephemeral=True)
+        return
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
         await ctx.respond(notice('Use this command in Discord', "This command can only be used in a server.", tone='warning'), ephemeral=True)
         return

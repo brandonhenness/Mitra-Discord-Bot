@@ -12,6 +12,7 @@ from pathlib import Path
 import discord
 
 from mitra_bot.discord_app.peer_dashboard import build_dashboard
+from mitra_bot.discord_app.access import infrastructure_guild
 
 
 def dashboard_marker(mesh, guild):
@@ -63,6 +64,8 @@ class SharedDashboard:
             raise RuntimeError("Dashboard refresh failed: " + ", ".join(failures))
 
     async def refresh(self, setting):
+        if not infrastructure_guild(self.bot, setting["guild"]):
+            raise ValueError("Infrastructure dashboards require an authorized Discord server")
         channel = self.bot.get_channel(setting["channel"]) or await self.bot.fetch_channel(setting["channel"])
         verify_channel(channel, channel.guild, dashboard=True)
         if channel.guild.id != setting["guild"]:

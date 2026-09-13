@@ -16,7 +16,7 @@ async def fleet(path=":memory:"):
     db = sqlite3.connect(path)
     mesh = SimpleNamespace(db=db, config=SimpleNamespace(node_id="a"), peers={"b": None, "c": None},
                            is_state_owner=True, boot_id="old-a", request=AsyncMock())
-    bot = SimpleNamespace(is_ready=lambda: True, gateway_connected=True, close=AsyncMock())
+    bot = SimpleNamespace(state=SimpleNamespace(infrastructure_guild_ids=(1,)), is_ready=lambda: True, gateway_connected=True, close=AsyncMock())
     value = FleetUpdates(bot, mesh)
     value.running_version = "1.0.0"
     value.spawn = lambda coroutine: coroutine.close()
@@ -46,7 +46,7 @@ def test_progress_message_is_reused_after_plan_saves():
     async def run():
         f = await fleet()
         message = SimpleNamespace(edit=AsyncMock())
-        channel = SimpleNamespace(id=456, get_partial_message=Mock(return_value=message))
+        channel = SimpleNamespace(id=456, guild=SimpleNamespace(id=1), get_partial_message=Mock(return_value=message))
         f.bot.get_channel = Mock(return_value=channel)
         f.bot.http = SimpleNamespace(request=AsyncMock(return_value={"id": "789"}))
         plan = dict(id="a"*32, version="1.1.0", state="running", channel=456, nodes=[dict(node="b", state="pending")])
@@ -198,12 +198,12 @@ def test_member_picker_schema_and_admin_confirmed_target():
                 option = next(o for o in command.options if o.name == "server")
                 assert option.input_type == discord.SlashCommandOptionType.string
                 assert option.default == "all"
-        bot.state = SimpleNamespace(admin_role_name="Admin")
+        bot.state = SimpleNamespace(admin_role_name="Admin", infrastructure_guild_ids=(1,))
         bot.fleet_updates = SimpleNamespace(begin=AsyncMock(return_value={"id": "plan"}))
         view = UpdatePromptView(bot.get_cog("UpdateCog"), SimpleNamespace(version="1.1.0"), source="fleet", server="b")
         user = Mock(spec=discord.Member)
         user.roles, user.id = [SimpleNamespace(name="Admin")], 55
-        interaction = SimpleNamespace(client=bot, guild=object(), user=user, channel_id=123,
+        interaction = SimpleNamespace(client=bot, guild=SimpleNamespace(id=1), user=user, channel_id=123,
             response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock())
         await view.children[0].callback(interaction)
         bot.fleet_updates.begin.assert_awaited_once_with("b", "1.1.0", 55, channel_id=123)
@@ -265,12 +265,12 @@ def test_release_resolution_is_pinned_to_local_repository(monkeypatch, bad):
 def test_up_to_date_owner_still_offers_update_for_older_peer(monkeypatch):
     from mitra_bot.discord_app.cogs import update_cog
     async def run():
-        bot = SimpleNamespace(state=SimpleNamespace(admin_role_name="Admin"))
+        bot = SimpleNamespace(state=SimpleNamespace(admin_role_name="Admin", infrastructure_guild_ids=(1,)))
         bot.fleet_updates = SimpleNamespace(preview=AsyncMock(return_value={
             "b": dict(version="1.0.0"), "a": dict(version="1.1.0")}))
         actor = Mock(spec=discord.Member)
         actor.roles = [SimpleNamespace(name="Admin")]
-        ctx = SimpleNamespace(guild=object(), author=actor, bot=bot, defer=AsyncMock(), respond=AsyncMock())
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), author=actor, bot=bot, defer=AsyncMock(), respond=AsyncMock())
         release = SimpleNamespace(version="1.1.0", html_url="https://github.com/trusted/bot/releases/tag/v1.1.0")
         monkeypatch.setattr(update_cog, "check_latest_release", lambda: SimpleNamespace(error=None, release=release, available=False))
         cog = UpdateCog(bot)

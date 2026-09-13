@@ -89,6 +89,7 @@ def write_storage_json(data: Dict[str, Any]) -> None:
     cfg = read_config_dict()
 
     cfg["bot"] = {
+        **cfg.get("bot", {}),
         "channel_id": normalized.get("channel_id") or normalized.get("channel"),
         "ip_poll_seconds": int(normalized.get("ip_poll_seconds", 900)),
         "admin_role_name": str(normalized.get("admin_role_name", "Mitra Admin")),
@@ -475,6 +476,7 @@ def set_todo_list_board_message_id(list_channel_id: int, message_id: int, *, gui
     data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _ensure_list_rec(cfg, list_channel_id)
+    _check_list_owner(rec, guild_id)
     rec["board_message_id"] = str(int(message_id))
     if guild_id is not None:
         rec["guild_id"] = str(int(guild_id))
@@ -482,10 +484,16 @@ def set_todo_list_board_message_id(list_channel_id: int, message_id: int, *, gui
     write_storage_json(data)
 
 
-def get_todo_tasks_for_list_channel(list_channel_id: int) -> list[Dict[str, Any]]:
+def _check_list_owner(rec, guild_id):
+    if guild_id is not None and rec.get("guild_id") is not None and str(rec["guild_id"]) != str(guild_id):
+        raise ValueError("To-do list belongs to another Discord server")
+
+
+def get_todo_tasks_for_list_channel(list_channel_id: int, *, guild_id: Optional[int] = None) -> list[Dict[str, Any]]:
     data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _find_list_rec(cfg, list_channel_id)
+    _check_list_owner(rec or {}, guild_id)
     rows = rec.get("tasks", []) if rec else []
     return rows if isinstance(rows, list) else []
 
@@ -495,6 +503,7 @@ def set_todo_tasks_for_list_channel(list_channel_id: int, items: list[Dict[str, 
     data = read_storage_json()
     cfg = _todo_cfg(data)
     rec = _ensure_list_rec(cfg, list_channel_id)
+    _check_list_owner(rec, guild_id)
     rec["tasks"] = items
     if guild_id is not None:
         rec["guild_id"] = str(int(guild_id))
@@ -600,8 +609,8 @@ def get_todo_list_channel_ids_for_guild(guild_id: int) -> list[int]:
         if not isinstance(rec, dict):
             continue
         rec_guild_id = rec.get("guild_id")
-        # Fallback: include entries with unknown guild_id.
-        if rec_guild_id is not None and str(rec_guild_id) != str(guild_id):
+        # Unowned legacy records must never appear in every Discord server.
+        if rec_guild_id is None or str(rec_guild_id) != str(guild_id):
             continue
         try:
             ids.append(int(raw_id))

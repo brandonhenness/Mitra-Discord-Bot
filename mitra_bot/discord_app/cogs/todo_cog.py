@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 import discord
 from discord.ext import commands
+from mitra_bot.discord_app.access import infrastructure_guild
 from mitra_bot.discord_app.cogs.todo_common import (
     TodoItem,
     assignee_mentions as _assignee_mentions,
@@ -39,6 +40,17 @@ from mitra_bot.storage.storage_store import (
 )
 
 
+def can_manage_lists(guild, member) -> bool:
+    return (guild is not None and isinstance(member, discord.Member)
+            and member.guild.id == guild.id and member.guild_permissions.manage_channels)
+
+
+async def reject_todo(interaction) -> None:
+    await interaction.response.send_message(notice(
+        'To-do access required', 'Use a to-do channel you can access in this server. Creating lists requires Manage Channels.',
+        tone='warning'), ephemeral=True)
+
+
 class ThreadEditTaskModal(discord.ui.Modal):
     def __init__(self, cog: "TodoCog", list_channel_id: int, task_id: int, current_title: str, current_notes: str) -> None:
         super().__init__(title="Edit Task")
@@ -57,8 +69,15 @@ class ThreadEditTaskModal(discord.ui.Modal):
         self.add_item(self.notes_input)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if (not self.cog.can_use_list(interaction.guild, interaction.user, self.list_channel_id)
+                or not isinstance(interaction.channel, discord.Thread)):
+            await reject_todo(interaction)
+            return
         items = self.cog._load_items(self.list_channel_id)
         item = next((x for x in items if x.id == self.task_id), None)
+        if item is not None and item.thread_id != interaction.channel.id:
+            await reject_todo(interaction)
+            return
         if item is None:
             await interaction.response.send_message(notice('Task not found', "This task may have been removed. Open the list board to choose an existing task.", tone='warning'), ephemeral=True)
             return
@@ -85,6 +104,8 @@ class TaskThreadView(discord.ui.View):
 
     async def _resolve(self, interaction: discord.Interaction) -> Tuple[Optional[int], List[TodoItem], Optional[TodoItem]]:
         if interaction.guild is None or not isinstance(interaction.channel, discord.Thread):
+            return None, [], None
+        if not self.cog.can_use_list(interaction.guild, interaction.user, interaction.channel.parent_id):
             return None, [], None
         return self.cog.find_task_by_thread(interaction.guild, interaction.channel.id)
 
@@ -190,6 +211,10 @@ class AddTaskModal(discord.ui.Modal):
         self.add_item(self.notes_input)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if (getattr(interaction.guild, "id", None) != self.guild_id
+                or not self.cog.can_use_list(interaction.guild, interaction.user, self.list_channel_id)):
+            await reject_todo(interaction)
+            return
         title = (self.title_input.value or "").strip()
         notes = (self.notes_input.value or "").strip()
         if not title:
@@ -214,7 +239,7 @@ class AddTaskModal(discord.ui.Modal):
 
         board_message = await self.cog.get_or_create_board_message_for_list(self.guild_id, self.list_channel_id)
         if board_message is None:
-            await interaction.response.send_message(notice('Task request could not finish', "The list board could not be opened. Check that Mitra can view and send messages in the list channel.", tone='error'), ephemeral=True)
+            await interaction.followup.send(notice('Task request could not finish', "The list board could not be opened. Check that Mitra can view and send messages in the list channel.", tone='error'), ephemeral=True)
             return
 
         thread_mention = "Not created"
@@ -266,7 +291,8 @@ class BoardView(discord.ui.View):
             guild_id = interaction.guild.id
         if list_channel_id == 0 and isinstance(interaction.channel, discord.TextChannel):
             list_channel_id = interaction.channel.id
-        if guild_id == 0 or list_channel_id == 0:
+        if (getattr(interaction.guild, "id", None) != guild_id
+                or not self.cog.can_use_list(interaction.guild, interaction.user, list_channel_id)):
             await interaction.response.send_message(notice('Task request could not finish', "Could not resolve list context.", tone='error'), ephemeral=True)
             return
         await interaction.response.send_modal(AddTaskModal(self.cog, guild_id, list_channel_id))
@@ -285,6 +311,10 @@ class ListCreateModal(discord.ui.Modal):
         self.add_item(self.name_input)
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if (getattr(interaction.guild, "id", None) != self.guild_id
+                or not can_manage_lists(interaction.guild, interaction.user)):
+            await reject_todo(interaction)
+            return
         if interaction.guild is None:
             await interaction.response.send_message(notice('Use this command in Discord', "Run this command in a Discord server channel, rather than a direct message.", tone='warning'), ephemeral=True)
             return
@@ -312,7 +342,8 @@ class HubView(discord.ui.View):
         guild_id = self.guild_id
         if guild_id == 0 and interaction.guild is not None:
             guild_id = interaction.guild.id
-        if guild_id == 0:
+        if (getattr(interaction.guild, "id", None) != guild_id
+                or not can_manage_lists(interaction.guild, interaction.user)):
             await interaction.response.send_message(notice('Task request could not finish', "Could not resolve guild context.", tone='error'), ephemeral=True)
             return
         await interaction.response.send_modal(ListCreateModal(self.cog, guild_id))
@@ -328,14 +359,44 @@ class TodoCog(commands.Cog):
 
     todo = discord.SlashCommandGroup(name="todo", description="Thread-first task management")
 
+    def valid_list(self, guild, channel_id) -> bool:
+        if guild is None:
+            return False
+        channel = guild.get_channel(channel_id)
+        if not isinstance(channel, discord.TextChannel) or channel.guild.id != guild.id:
+            return False
+        return channel_id in (set(get_todo_list_channel_ids_for_guild(guild.id))
+                              | {ch.id for ch in self._list_channels_in_category(guild)})
+
+    def can_use_list(self, guild, member, channel_id) -> bool:
+        if (not self.valid_list(guild, channel_id) or not isinstance(member, discord.Member)
+                or member.guild.id != guild.id):
+            return False
+        permissions = guild.get_channel(channel_id).permissions_for(member)
+        return permissions.view_channel and permissions.send_messages and permissions.send_messages_in_threads
+
     def _load_items(self, list_channel_id: int) -> List[TodoItem]:
-        return [_to_item(x) for x in get_todo_tasks_for_list_channel(list_channel_id)]
+        channel = self.bot.get_channel(list_channel_id)
+        if not isinstance(channel, discord.TextChannel):
+            return []
+        return [_to_item(x) for x in get_todo_tasks_for_list_channel(list_channel_id, guild_id=channel.guild.id)]
+
+    async def cog_check(self, ctx) -> bool:
+        if ctx.guild is None:
+            await ctx.respond(notice('Use this command in Discord', 'To-do lists belong to a Discord server.', tone='warning'), ephemeral=True)
+            return False
+        if isinstance(ctx.channel, discord.Thread) and not self.can_use_list(ctx.guild, ctx.user, ctx.channel.parent_id):
+            await ctx.respond(notice('Permission required', 'You cannot edit this to-do list.', tone='warning'), ephemeral=True)
+            return False
+        return True
 
     def _save_items(self, list_channel_id: int, items: List[TodoItem]) -> None:
         guild_id: Optional[int] = None
         channel = self.bot.get_channel(list_channel_id)
         if isinstance(channel, discord.TextChannel):
             guild_id = channel.guild.id
+        if guild_id is None:
+            raise ValueError("Cannot save a to-do list without a Discord server owner")
         set_todo_tasks_for_list_channel(
             list_channel_id, [_to_raw(i) for i in items], guild_id=guild_id
         )
@@ -588,6 +649,8 @@ class TodoCog(commands.Cog):
     async def _reconcile_assignees_with_thread_members(
         self, guild: discord.Guild, list_channel_id: int
     ) -> bool:
+        if not self.valid_list(guild, list_channel_id):
+            return False
         items = self._load_items(list_channel_id)
         changed = False
         for item in items:
@@ -602,7 +665,8 @@ class TodoCog(commands.Cog):
                     fetched = None
                 thread = fetched if isinstance(fetched, discord.Thread) else None
 
-            if not isinstance(thread, discord.Thread):
+            if (not isinstance(thread, discord.Thread) or thread.guild.id != guild.id
+                    or thread.parent_id != list_channel_id):
                 continue
 
             try:
@@ -640,6 +704,8 @@ class TodoCog(commands.Cog):
 
     async def ensure_board_for_all_guilds(self) -> None:
         for guild in self.bot.guilds:
+            if not infrastructure_guild(self.bot, guild) and not get_todo_category_id_for_guild(guild.id):
+                continue
             try:
                 await self.ensure_lists_for_guild(guild)
             except Exception:
@@ -651,6 +717,8 @@ class TodoCog(commands.Cog):
         category_ids = [ch.id for ch in self._list_channels_in_category(guild)]
         channel_ids = sorted(set(get_todo_list_channel_ids_for_guild(guild.id) + category_ids))
         for list_channel_id in channel_ids:
+            if not self.valid_list(guild, list_channel_id):
+                continue
             items = self._load_items(list_channel_id)
             for item in items:
                 if item.thread_id == thread_id:
@@ -666,6 +734,8 @@ class TodoCog(commands.Cog):
         creator_id: int,
         creator_member: Optional[discord.Member],
     ) -> Tuple[TodoItem, str]:
+        if not self.can_use_list(guild, creator_member, list_channel_id):
+            raise ValueError("To-do list is not accessible in this Discord server")
         items = self._load_items(list_channel_id)
         next_id = max((i.id for i in items), default=0) + 1
         item = TodoItem(
@@ -711,11 +781,11 @@ class TodoCog(commands.Cog):
         self, guild: discord.Guild, channel: Optional[discord.abc.GuildChannel], explicit_list: Optional[discord.TextChannel]
     ) -> Optional[int]:
         if explicit_list is not None:
-            return explicit_list.id
+            return explicit_list.id if explicit_list.guild.id == guild.id and self.valid_list(guild, explicit_list.id) else None
         if isinstance(channel, discord.TextChannel):
             list_ids = set(get_todo_list_channel_ids_for_guild(guild.id))
             category_ids = {ch.id for ch in self._list_channels_in_category(guild)}
-            if channel.id in (list_ids | category_ids):
+            if channel.guild.id == guild.id and channel.id in (list_ids | category_ids):
                 return channel.id
         return None
 
@@ -882,7 +952,7 @@ class TodoCog(commands.Cog):
             return
 
         list_channel_id = self._resolve_list_channel_id_from_context(ctx.guild, ctx.channel, list_channel)
-        if list_channel_id is None:
+        if list_channel_id is None or not self.can_use_list(ctx.guild, ctx.user, list_channel_id):
             await ctx.respond(
                 notice('To-do list', "Run this command in a list channel or pass `list_channel` explicitly.", tone='info'),
                 ephemeral=True,
@@ -1015,6 +1085,10 @@ class TodoCog(commands.Cog):
         ctx: discord.ApplicationContext,
         name: str = discord.Option(str, description="List name", required=True),
     ) -> None:
+        if not can_manage_lists(ctx.guild, ctx.user):
+            await ctx.respond(notice('Permission required', 'Creating to-do lists requires Manage Channels in this server.', tone='warning'), ephemeral=True)
+            return
+        await ctx.defer(ephemeral=True)
         if ctx.guild is None:
             await ctx.respond(notice('Use this command in Discord', "This command can only be used in a server.", tone='warning'), ephemeral=True)
             return
