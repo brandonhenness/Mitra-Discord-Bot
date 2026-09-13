@@ -34,13 +34,14 @@ def test_command_schema_preserves_boolean_and_optional_node_options():
             bot.add_cog(cog)
         return bot
     bot = asyncio.run(register())
-    commands = [bot.get_cog("IPCog").status, bot.get_cog("AboutCog").about,
+    assert bot.get_cog("AboutCog").about.to_dict()["options"] == []
+    commands = [bot.get_cog("IPCog").status,
                 bot.get_cog("UPSCog").monitoring, bot.get_cog("UPSCog").timezone]
     for command in commands:
         options = {o.name: o.to_dict() for o in command.options}
         assert options["server"]["type"] == 3
         assert not options["server"]["required"]
-    assert next(o for o in commands[2].options if o.name == "enabled").to_dict()["type"] == 5
+    assert next(o for o in commands[1].options if o.name == "enabled").to_dict()["type"] == 5
 
 
 def test_selected_nodes_and_command_routing():
@@ -123,11 +124,15 @@ def test_ip_all_retains_success_when_another_node_is_unavailable():
 def test_about_displays_each_nodes_own_version():
     async def run():
         bot = bot_mesh()
+        bot.guilds = [SimpleNamespace(id=1)]
+        bot.peer_service.local_health = lambda: dict(process_uptime_seconds=60, discord_connected=True)
         bot.peer_service.request.return_value = dict(version="remote-version", python="3.10", pycord="2.7",
             discord_servers=1, health=dict(process_uptime_seconds=120, discord_connected=True))
         ctx = SimpleNamespace(guild=SimpleNamespace(id=1), defer=AsyncMock(), respond=AsyncMock())
-        await AboutCog.about.callback(AboutCog(bot), ctx, "test")
-        field = ctx.respond.call_args.kwargs["embed"].fields[0]
+        await AboutCog.about.callback(AboutCog(bot), ctx)
+        fields = ctx.respond.call_args.kwargs["embed"].fields
+        assert [field.name for field in fields] == ["mitra", "test"]
+        field = fields[1]
         assert field.name == "test" and "remote-version" in field.value and "2m" in field.value
     asyncio.run(run())
 
