@@ -1,5 +1,4 @@
 from mitra_bot.discord_app.message_style import embed as styled_embed
-from mitra_bot.discord_app.message_style import notice
 
 import platform
 import time
@@ -9,7 +8,6 @@ from discord.ext import commands
 
 from mitra_bot import __version__
 from mitra_bot.discord_app.node_commands import selected_nodes, read_nodes
-from mitra_bot.services.peer_service import PeerError
 from mitra_bot.discord_app.access import infrastructure_guild
 
 POLICY_LINKS = (
@@ -24,8 +22,7 @@ class AboutCog(commands.Cog):
         self._started_at_epoch = int(time.time())
 
     @discord.slash_command(name="about", description="Show bot info and runtime details.")
-    async def about(self, ctx: discord.ApplicationContext,
-                    server: str = discord.Option(str, description="Server ID or all (default: all servers)", required=False, default=None)) -> None:
+    async def about(self, ctx: discord.ApplicationContext) -> None:
         if not infrastructure_guild(self.bot, ctx.guild):
             await ctx.respond(embed=styled_embed(
                 title="Mitra Bot",
@@ -36,11 +33,7 @@ class AboutCog(commands.Cog):
             return
         await ctx.defer(ephemeral=True)
         if getattr(self.bot, "peer_service", None):
-            try:
-                nodes = selected_nodes(self.bot, server, default_all=True)
-            except PeerError as exc:
-                await ctx.respond(notice('Bot information unavailable', str(exc), tone='error'), ephemeral=True)
-                return
+            nodes = selected_nodes(self.bot, None, default_all=True)
             results = await read_nodes(self.bot, nodes, "node_info")
             for start in range(0, len(results), 8):
                 embed = styled_embed(title="Mitra Bot · network", color=discord.Color.blurple())
@@ -58,11 +51,6 @@ class AboutCog(commands.Cog):
                     embed.add_field(name=node, value=value, inline=False)
                 embed.description = POLICY_LINKS
                 await ctx.respond(embed=embed, ephemeral=True)
-            return
-        try:
-            selected_nodes(self.bot, server, default_all=True)
-        except PeerError as exc:
-            await ctx.respond(notice('Bot information unavailable', str(exc), tone='error'), ephemeral=True)
             return
         now = int(time.time())
         embed = styled_embed(
