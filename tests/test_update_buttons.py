@@ -15,7 +15,7 @@ def test_install_button_edits_private_prompt_through_interaction(monkeypatch, ok
         release = ReleaseInfo("v0.2.0b5", "https://example.com/update.zip", "https://example.com/release", "")
         installer = Mock(return_value=InstallResult(ok=ok, version=release.version, error=None if ok else "test failure"))
         monkeypatch.setattr(update_cog, "install_release", installer)
-        bot = SimpleNamespace(state=SimpleNamespace(admin_role_name="Mitra Admin"))
+        bot = SimpleNamespace(state=SimpleNamespace(admin_role_name="Mitra Admin", infrastructure_guild_ids=(1,)))
         cog = update_cog.UpdateCog(bot)
         cog._restart_after_update = AsyncMock()
         view = update_cog.UpdatePromptView(cog, release, source="manual-check")
@@ -23,7 +23,7 @@ def test_install_button_edits_private_prompt_through_interaction(monkeypatch, ok
         user.roles = [SimpleNamespace(name="Mitra Admin")]
         message = SimpleNamespace(edit=AsyncMock(side_effect=AssertionError("ephemeral messages cannot use channel edits")))
         interaction = SimpleNamespace(
-            guild=object(), user=user, client=bot, message=message,
+            guild=SimpleNamespace(id=1), user=user, client=bot, message=message,
             response=SimpleNamespace(defer=AsyncMock()), edit_original_response=AsyncMock(),
         )
         await view.children[0].callback(interaction)
@@ -61,7 +61,7 @@ def test_non_admin_button_never_installs(monkeypatch):
         monkeypatch.setattr(update_cog, "install_release", installer)
         cog = update_cog.UpdateCog(SimpleNamespace())
         view = update_cog.UpdatePromptView(cog, None, source="test")
-        interaction = SimpleNamespace(guild=None, user=None, response=SimpleNamespace(send_message=AsyncMock()))
+        interaction = SimpleNamespace(guild=None, user=None, client=cog.bot, response=SimpleNamespace(send_message=AsyncMock()))
         await view.children[0].callback(interaction)
         interaction.response.send_message.assert_awaited_once()
         installer.assert_not_called()

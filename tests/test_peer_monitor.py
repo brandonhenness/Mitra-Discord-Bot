@@ -353,7 +353,7 @@ def test_removed_members_do_not_block_retained_history_replication():
 def test_discord_alert_nonce_mentions_dedup_and_delayed_summary():
     async def run():
         m = monitor()
-        bot = SimpleNamespace(is_ready=lambda:True, gateway_connected=True, user=SimpleNamespace(id=99),
+        bot = SimpleNamespace(state=SimpleNamespace(infrastructure_guild_ids=(123,)), is_ready=lambda:True, gateway_connected=True, user=SimpleNamespace(id=99),
                               http=SimpleNamespace(request=AsyncMock(return_value={"id":"42"})))
         role = SimpleNamespace(id=789, mention="<@&789>")
         channel = Mock(spec=discord.TextChannel)
@@ -414,7 +414,7 @@ def test_detected_outage_and_recovery_flush_with_footerless_channel_history():
     async def run():
         m = monitor()
         enable(m)
-        bot = SimpleNamespace(is_ready=lambda: True, gateway_connected=True, user=SimpleNamespace(id=99),
+        bot = SimpleNamespace(state=SimpleNamespace(infrastructure_guild_ids=(123,)), is_ready=lambda: True, gateway_connected=True, user=SimpleNamespace(id=99),
                               http=SimpleNamespace(request=AsyncMock(return_value={"id": "42"})))
         channel = Mock(spec=discord.TextChannel)
         channel.id = 456

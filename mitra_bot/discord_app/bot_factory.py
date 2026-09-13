@@ -12,6 +12,7 @@ from typing import Optional
 import discord
 
 from mitra_bot.discord_app.interaction_routing import ClaimedContext, claim_interaction, command_route, response_delay
+from mitra_bot.discord_app.access import PUBLIC_COMMANDS, command_allowed
 
 
 class MitraBot(discord.Bot):
@@ -38,6 +39,15 @@ class MitraBot(discord.Bot):
         )
 
     async def process_application_commands(self, interaction, auto_sync=None):
+        if not command_allowed(self, interaction.guild, (interaction.data or {}).get("name", "")):
+            if interaction.type == discord.InteractionType.auto_complete:
+                await interaction.response.send_autocomplete_result([])
+            elif await claim_interaction(interaction, delay=0, ephemeral=True):
+                await interaction.followup.send(
+                    notice('Command unavailable', 'This command is not available in this Discord server.', tone='warning'),
+                    ephemeral=True,
+                )
+            return
         mesh = self.peer_service
         if mesh is None:
             return await super().process_application_commands(interaction, auto_sync)
@@ -53,7 +63,7 @@ class MitraBot(discord.Bot):
             return
         if not fallback and not self.owns_application_state:
             await interaction.followup.send(
-                notice('Shared settings owner unavailable', f"This command belongs to `{preferred}`, which did not accept it. Its application state is not replicated; no change was made.", tone='info'),
+                notice('Service temporarily unavailable', "The service that stores these lists and settings is unavailable; no change was made. Please try again later.", tone='info'),
                 ephemeral=True,
             )
             return
@@ -82,6 +92,7 @@ class AppState:
     channel_id: Optional[int]
     admin_role_name: str
     ip_subscriber_role_name: str
+    infrastructure_guild_ids: tuple[int, ...] = ()
 
 
 def create_bot(*, state: AppState) -> discord.Bot:
@@ -99,6 +110,15 @@ def create_bot(*, state: AppState) -> discord.Bot:
     bot.state = state  # type: ignore[attr-defined]
 
     _register_cogs(bot)
+    for command in bot.pending_application_commands:
+        if hasattr(discord, "InteractionContextType"):
+            command.contexts = {discord.InteractionContextType.guild}
+            command.integration_types = {discord.IntegrationType.guild_install}
+        else:
+            command.guild_only = True
+        if command.name not in PUBLIC_COMMANDS:
+            # [] registers nowhere; None would expose the command globally.
+            command.guild_ids = list(state.infrastructure_guild_ids)
     return bot
 
 

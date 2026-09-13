@@ -29,7 +29,7 @@ def fixture():
         yield member
     guild.fetch_members = members
     store = SimpleNamespace(settings=lambda: [{"guild": 1, "subject": "test", "role": 12}])
-    bot = SimpleNamespace(state=SimpleNamespace(admin_role_name="Admin", ip_subscriber_role_name="Mitra IP Subscriber"),
+    bot = SimpleNamespace(state=SimpleNamespace(infrastructure_guild_ids=(1,), admin_role_name="Admin", ip_subscriber_role_name="Mitra IP Subscriber"),
                           peer_service=SimpleNamespace(monitor=SimpleNamespace(store=store)))
     return bot, guild, member, shared, ip, peer
 
@@ -106,7 +106,7 @@ def test_ip_notifications_use_shared_destination_and_honor_disable(monkeypatch):
     from mitra_bot.discord_app.cogs import ip_cog
     settings = [{"subject": "*", "guild": 1, "role": 10, "channel": 100, "enabled": True}]
     mesh = SimpleNamespace(config=SimpleNamespace(node_id="Anubis"), monitor=SimpleNamespace(store=SimpleNamespace(settings=lambda: settings)), notify=AsyncMock(return_value=True))
-    bot = SimpleNamespace(peer_service=mesh, state=SimpleNamespace(channel_id=300))
+    bot = SimpleNamespace(peer_service=mesh, state=SimpleNamespace(channel_id=300, infrastructure_guild_ids=(1,)))
     monkeypatch.setattr(ip_cog, "get_notification_channel_map", lambda: {1: 200})
     cog = ip_cog.IPCog(bot)
     assert asyncio.run(cog.notify_ip_change("203.0.113.1"))

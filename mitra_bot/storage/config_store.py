@@ -52,9 +52,20 @@ class BotFileConfigModel(BaseModel):
 
     channel_id: int | None = None
     guild_id: int | None = Field(default=None, ge=1)
+    # None preserves the wizard's explicit guild_id; [] means public utilities only.
+    infrastructure_guild_ids: list[int] | None = None
     ip_poll_seconds: int = 900
     admin_role_name: str = "Mitra Admin"
     ip_subscriber_role_name: str = "Mitra Alerts"
+
+    @field_validator("infrastructure_guild_ids", mode="before")
+    @classmethod
+    def _validate_infrastructure_guilds(cls, value):
+        if value is not None and (not isinstance(value, list) or any(
+            type(guild_id) is not int or not 0 < guild_id < 2**64 for guild_id in value
+        )):
+            raise ValueError("infrastructure_guild_ids must be a list of positive Discord server IDs")
+        return value
 
     @field_validator("channel_id", mode="before")
     @classmethod

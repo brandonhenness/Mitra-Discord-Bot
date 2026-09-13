@@ -71,7 +71,7 @@ def channel_and_bot(m):
     channel.permissions_for.return_value = discord.Permissions.all()
     bot = SimpleNamespace(user=SimpleNamespace(id=99),peer_service=m.mesh,is_ready=lambda:True,gateway_connected=True,
                           get_channel=lambda _:channel,http=SimpleNamespace(request=AsyncMock(return_value={"id":"42"})),
-                          state=SimpleNamespace(admin_role_name="Admin"))
+                          state=SimpleNamespace(admin_role_name="Admin", infrastructure_guild_ids=(123,)))
     return channel,bot,guild
 
 

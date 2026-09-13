@@ -10,6 +10,7 @@ from urllib.parse import quote, unquote
 
 import discord
 from discord.http import Route
+from mitra_bot.discord_app.access import infrastructure_guild
 
 ALERT_DETAILS_URL = "https://github.com/brandonhenness/Mitra-Discord-Bot/blob/main/docs/operations-recovery.md"
 
@@ -19,6 +20,8 @@ class PeerAlertDelivery:
         self.bot, self.mesh = bot, mesh
 
     async def __call__(self, key, kind, incident, setting, role_setting):
+        if not infrastructure_guild(self.bot, setting["guild"]):
+            raise ValueError("Infrastructure alerts require an authorized Discord server")
         if not self.bot.is_ready() or not self.bot.gateway_connected:
             raise RuntimeError("Discord is disconnected")
         channel = self.bot.get_channel(setting["channel"]) or await self.bot.fetch_channel(setting["channel"])
