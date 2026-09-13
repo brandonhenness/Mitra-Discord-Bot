@@ -1,4 +1,8 @@
 [bot]
+# Operator-owned Discord server IDs allowed to use infrastructure features.
+# infrastructure_guild_ids = [123456789012345678]
+# [] explicitly disables infrastructure access everywhere. When omitted, only
+# the guided setup's saved guild_id is trusted; without either, all guilds are public.
 ip_poll_seconds = 900
 admin_role_name = "Mitra Admin"
 ip_subscriber_role_name = "Mitra Alerts"

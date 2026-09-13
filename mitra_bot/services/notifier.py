@@ -7,6 +7,7 @@ from typing import Iterable, Optional
 import discord
 
 from mitra_bot.services.peer_service import Notification
+from mitra_bot.discord_app.access import infrastructure_channel
 
 
 class Notifier:
@@ -34,7 +35,7 @@ class Notifier:
             if channel is None:
                 channel = await self.bot.fetch_channel(int(channel_id))
 
-            if isinstance(channel, (discord.TextChannel, discord.Thread)):
+            if isinstance(channel, (discord.TextChannel, discord.Thread)) and infrastructure_channel(self.bot, channel):
                 await channel.send(message)
                 return True
             else:
@@ -45,17 +46,9 @@ class Notifier:
         return False
 
     async def dm_subscribers(self, subscriber_ids: Iterable[int], message: str) -> None:
-        for user_id in list(subscriber_ids):
-            mesh = getattr(self.bot, "peer_service", None)
-            if mesh is not None:
-                await mesh.notify(Notification(user_id=int(user_id), message=message))
-                continue
-            try:
-                user = await self.bot.fetch_user(int(user_id))
-                await user.send(message)
-            except Exception:
-                # Common case: user has DMs closed or blocked the bot
-                logging.debug("Failed to DM subscriber %s", user_id)
+        # Legacy user IDs carry no guild ownership or current authorization.
+        # Operational alerts are delivered only to authorized guild channels.
+        return
 
     async def notify(
         self,

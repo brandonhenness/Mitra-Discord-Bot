@@ -14,6 +14,7 @@ import discord
 from pydantic import BaseModel, ConfigDict, Field
 
 from mitra_bot.discord_app.interaction_routing import claim_interaction, response_delay
+from mitra_bot.discord_app.access import infrastructure_guild
 from mitra_bot.services.peer_service import PeerError, PowerRequest
 
 PAYLOAD = struct.Struct("!8s16sIIBQ")
@@ -118,7 +119,7 @@ async def handle_power_component(bot, interaction):
     if not await claim_interaction(interaction, delay=response_delay(mesh, intent.server, interaction.id)):
         return
     user = interaction.user
-    if not isinstance(user, discord.Member) or not any(role.name == bot.state.admin_role_name for role in user.roles):
+    if not infrastructure_guild(bot, interaction.guild) or not isinstance(user, discord.Member) or not any(role.name == bot.state.admin_role_name for role in user.roles):
         await interaction.followup.send(notice('Administrator access required', "Only members with the admin role can use power confirmations.", tone='warning'), ephemeral=True)
         return
     request = PowerRequest(action=intent.action, delay_seconds=intent.delay_seconds, force=intent.force,

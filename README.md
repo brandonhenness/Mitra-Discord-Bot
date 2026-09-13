@@ -49,6 +49,20 @@ It is now a package-based app under `mitra_bot/` with cogs, services, tasks, and
 - Role-based access (`Mitra Admin` and `Mitra IP Subscriber` by default).
 - Persistent config via `config.toml` and runtime state via `state.db`.
 
+### Public Discord servers
+
+Inviting this bot gives a new Discord server `/todo` and a general `/about`.
+Infrastructure commands and alerts require operator authorization in
+`config.toml`; a role named `Mitra Admin` in another server grants no access.
+To-do lists and history are scoped to their Discord server. A member with
+Manage Channels can start with `/todo list_create`; joining a public server
+does not automatically create channels or infrastructure roles.
+
+Before restarting an existing deployment, review
+[public access configuration and rollout](docs/public-access.md). Only the
+saved `[bot].guild_id` from guided setup is trusted by default. Older manual
+installations must explicitly configure their authorized Discord server IDs.
+
 ## Project Layout
 
 ```text

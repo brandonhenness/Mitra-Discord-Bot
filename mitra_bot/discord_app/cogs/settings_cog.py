@@ -60,6 +60,9 @@ class SettingsCog(commands.Cog):
             await ctx.respond(notice('Use this command in Discord', "This command can only be used in a server.", tone='warning'), ephemeral=True)
             return
 
+        if channel.guild.id != ctx.guild.id:
+            await ctx.respond(notice('Choose a channel', 'Choose a channel in this Discord server.', tone='warning'), ephemeral=True)
+            return
         setting = NotificationChannelSetting(
             guild_id=ctx.guild.id,
             channel_id=channel.id,

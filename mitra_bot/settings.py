@@ -41,6 +41,7 @@ class AppSettings:
 
     admin_role_name: str
     ip_subscriber_role_name: str
+    infrastructure_guild_ids: tuple[int, ...] = ()
 
 
 class EnvSettings(BaseSettings):
@@ -110,4 +111,7 @@ def load_settings(*, interactive_token: bool = True) -> AppSettings:
         ups=ups,
         admin_role_name=str(bot_cfg.get("admin_role_name", "Mitra Admin")),
         ip_subscriber_role_name=str(bot_cfg.get("ip_subscriber_role_name", "Mitra Alerts")),
+        infrastructure_guild_ids=tuple(bot_cfg["infrastructure_guild_ids"]
+            if bot_cfg.get("infrastructure_guild_ids") is not None
+            else ([bot_cfg["guild_id"]] if bot_cfg.get("guild_id") else [])),
     )

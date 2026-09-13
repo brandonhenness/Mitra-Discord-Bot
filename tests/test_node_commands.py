@@ -22,7 +22,7 @@ def bot_mesh():
             raise PeerError("Unknown server")
         return node or "mitra"
     mesh.resolve = resolve
-    return SimpleNamespace(peer_service=mesh)
+    return SimpleNamespace(peer_service=mesh, state=SimpleNamespace(infrastructure_guild_ids=(1,)))
 
 
 def test_command_schema_preserves_boolean_and_optional_node_options():
@@ -73,7 +73,7 @@ def test_ups_remote_settings_do_not_modify_coordinator():
         bot.peer_service.request.return_value = {"message": "UPS monitoring disabled."}
         cog = object.__new__(UPSCog)
         cog.bot = bot
-        ctx = SimpleNamespace(defer=AsyncMock(), respond=AsyncMock())
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), defer=AsyncMock(), respond=AsyncMock())
         with patch("mitra_bot.discord_app.cogs.ups_cog.ensure_admin", return_value=None), \
              patch("mitra_bot.discord_app.cogs.ups_cog.set_ups_config") as save:
             await UPSCog.monitoring.callback(cog, ctx, False, "test")
@@ -110,7 +110,7 @@ def test_ip_all_retains_success_when_another_node_is_unavailable():
     async def run():
         bot = bot_mesh()
         bot.peer_service.request.side_effect = PeerError("offline")
-        ctx = SimpleNamespace(defer=AsyncMock(), respond=AsyncMock())
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), defer=AsyncMock(), respond=AsyncMock())
         with patch("mitra_bot.discord_app.node_commands.get_public_ip", return_value="203.0.113.1"):
             await IPCog.status.callback(IPCog(bot), ctx, "all")
         message = ctx.respond.call_args.args[0]
@@ -125,7 +125,7 @@ def test_about_displays_each_nodes_own_version():
         bot = bot_mesh()
         bot.peer_service.request.return_value = dict(version="remote-version", python="3.10", pycord="2.7",
             discord_servers=1, health=dict(process_uptime_seconds=120, discord_connected=True))
-        ctx = SimpleNamespace(defer=AsyncMock(), respond=AsyncMock())
+        ctx = SimpleNamespace(guild=SimpleNamespace(id=1), defer=AsyncMock(), respond=AsyncMock())
         await AboutCog.about.callback(AboutCog(bot), ctx, "test")
         field = ctx.respond.call_args.kwargs["embed"].fields[0]
         assert field.name == "test" and "remote-version" in field.value and "2m" in field.value
@@ -149,10 +149,10 @@ def test_dashboard_toggle_and_refresh_retain_perspective():
     async def run():
         bot = bot_mesh()
         bot.user = SimpleNamespace(id=123)
-        bot.state = SimpleNamespace(admin_role_name="Mitra Admin")
+        bot.state = SimpleNamespace(admin_role_name="Mitra Admin", infrastructure_guild_ids=(1,))
         view = dashboard_view(bot.peer_service, "test", "mitra", 24, 0)
         toggle = next(c for c in view.children if c.custom_id.endswith(":perspective"))
-        event = SimpleNamespace(id=123, guild=object(), user=Mock(spec=discord.Member),
+        event = SimpleNamespace(id=123, guild=SimpleNamespace(id=1), user=Mock(spec=discord.Member),
             message=SimpleNamespace(author=bot.user), data={"custom_id": toggle.custom_id},
             followup=SimpleNamespace(send=AsyncMock()))
         with patch("mitra_bot.discord_app.peer_dashboard.claim_interaction", new=AsyncMock(return_value=True)), \

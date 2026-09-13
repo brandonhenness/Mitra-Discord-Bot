@@ -8,6 +8,7 @@ import discord
 from discord.ext import commands
 
 from mitra_bot.services.notifier import Notifier
+from mitra_bot.discord_app.access import infrastructure_guild
 from mitra_bot.services.peer_service import Notification
 from mitra_bot.services.alert_roles import shared_role
 from mitra_bot.discord_app.node_commands import selected_nodes, read_nodes
@@ -74,7 +75,7 @@ class IPCog(commands.Cog):
                     destinations.pop(setting["guild"], None)
                     if setting["enabled"] and setting.get("channel"):
                         destinations[setting["guild"]] = setting["channel"]
-            channels = set(destinations.values())
+            channels = {channel for guild, channel in destinations.items() if infrastructure_guild(self.bot, guild)}
             if not destinations and not any(s["subject"] == "*" for s in mesh.monitor.store.settings()) and self.bot.state.channel_id:
                 channels.add(self.bot.state.channel_id)
             results = [await mesh.notify(Notification(channel_id=int(channel_id), message=msg_body,
@@ -84,6 +85,8 @@ class IPCog(commands.Cog):
         configured = 0
         failed = 0
         for guild in self.bot.guilds:
+            if not infrastructure_guild(self.bot, guild):
+                continue
             per_guild_channel_id = get_notification_channel_id_for_guild(guild.id)
             if not per_guild_channel_id:
                 continue
@@ -134,6 +137,8 @@ class IPCog(commands.Cog):
 
         mention_prefix = ""
         for guild in self.bot.guilds:
+            if not infrastructure_guild(self.bot, guild):
+                continue
             role_name = self.bot.state.ip_subscriber_role_name  # type: ignore[attr-defined]
             role = shared_role(guild) or discord.utils.get(guild.roles, name=role_name)
             if role:

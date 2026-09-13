@@ -12,6 +12,7 @@ import discord
 from mitra_bot.discord_app.interaction_routing import claim_interaction, response_delay
 from mitra_bot.services.peer_graph import metrics, render_history
 from mitra_bot.services.role_manager import member_has_role
+from mitra_bot.discord_app.access import infrastructure_guild
 
 
 def tag(node):
@@ -110,7 +111,7 @@ async def handle_dashboard_component(bot, interaction):
     mesh = bot.peer_service
     if not await claim_interaction(interaction, delay=response_delay(mesh, mesh.config.resolved_state_owner, interaction.id)):
         return
-    if (interaction.guild is None or not isinstance(interaction.user, discord.Member)
+    if (not infrastructure_guild(bot, interaction.guild) or not isinstance(interaction.user, discord.Member)
             or not member_has_role(interaction.user, bot.state.admin_role_name)):
         await interaction.followup.send(notice('Permission required', "You do not have permission to view this dashboard.", tone='warning'), ephemeral=True)
         return
