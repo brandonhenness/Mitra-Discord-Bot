@@ -14,6 +14,7 @@ from packaging.version import Version
 
 from mitra_bot import __version__
 from mitra_bot.services import update_service
+from mitra_bot.discord_app.message_style import pages
 
 
 def resolve_release(version):
@@ -57,23 +58,33 @@ class FleetUpdates:
             self.spawn(self.publish(value["id"]))
 
     @staticmethod
-    def progress_text(plan):
-        lines = [f"Mitra rolling update `{plan['version']}` · **{plan['state']}**",
-                 f"Plan `{plan['id']}`"]
+    def progress_sections(plan, *, full=False):
+        lines = [f"**Release** `{plan['version']}`\n**Status** {plan['state'].replace('_', ' ').capitalize()}"]
         labels = {"pending": "waiting", "waiting": "starting", "accepted": "starting",
                   "restarting": "reconnecting", "skipped": "already current"}
-        for entry in plan["nodes"][:20]:
-            state = entry.get("phase") or entry["state"]
-            lines.append(f"`{entry['node']}`: {labels.get(state, state)}")
-        if len(plan["nodes"]) > 20:
-            lines.append("Additional nodes: use /update status for the full list.")
         if plan.get("error"):
-            lines += [str(plan["error"])[:400],
-                      "Rollout stopped. Inspect the failed node's bot.log and .recovery files; "
-                      "run /servers doctor and /update status before starting a new rollout."]
+            lines += ["**What needs attention**\n" + str(plan["error"])[:400],
+                      "Rollout stopped. Inspect the failed node's `bot.log` and `.recovery` files. "
+                      "Run `/servers doctor` and `/update status` before starting a new rollout."]
         if plan["state"] == "cancelled":
             lines.append("An installation already started can finish; no further nodes will start.")
-        return "\n".join(lines)[:1950]
+        for entry in plan["nodes"] if full else plan["nodes"][:10]:
+            state = entry.get("phase") or entry["state"]
+            icon = "✅" if state in {"complete", "skipped"} else "❌" if state == "failed" else "⏳"
+            lines.append(f"{icon} **{entry['node']}** — {labels.get(state, state)}")
+        if not full and len(plan["nodes"]) > 10:
+            lines.append("Additional nodes: use `/update status` for the full list.")
+        lines.append(f"**Update reference** `{plan['id']}`")
+        return lines
+
+    @staticmethod
+    def progress_title(plan):
+        return {"complete": "✅ Rolling update complete", "failed": "❌ Rolling update stopped",
+                "cancelled": "⚠️ Rolling update cancelled"}.get(plan["state"], "Rolling update in progress")
+
+    @classmethod
+    def progress_text(cls, plan):
+        return next(pages(cls.progress_title(plan), cls.progress_sections(plan)))
 
     async def publish(self, plan_id):
         async with self.report_locks.setdefault(plan_id, asyncio.Lock()):

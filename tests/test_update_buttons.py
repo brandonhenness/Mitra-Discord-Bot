@@ -29,7 +29,7 @@ def test_install_button_edits_private_prompt_through_interaction(monkeypatch, ok
         await view.children[0].callback(interaction)
         interaction.response.defer.assert_awaited_once()
         titles = [c.kwargs["embed"].title for c in interaction.edit_original_response.call_args_list]
-        assert titles == ["Installing Update", "Update Installed" if ok else "Update Failed"]
+        assert titles == ["Installing update", "Update installed" if ok else "Update failed"]
         assert all(c.kwargs["view"] is None for c in interaction.edit_original_response.call_args_list)
         message.edit.assert_not_awaited()
         installer.assert_called_once_with(release)
@@ -47,7 +47,9 @@ def test_busy_install_uses_private_followup(monkeypatch):
         message = SimpleNamespace(reply=AsyncMock())
         async with cog._install_lock:
             await cog.install_release_with_feedback(release=None, message=message, source="test", interaction=interaction)
-        interaction.followup.send.assert_awaited_once_with("An update install is already in progress.", ephemeral=True)
+        interaction.followup.send.assert_awaited_once()
+        assert "An update install is already in progress." in interaction.followup.send.call_args.args[0]
+        assert interaction.followup.send.call_args.kwargs["ephemeral"] is True
         message.reply.assert_not_awaited()
         installer.assert_not_called()
     asyncio.run(run())

@@ -1,5 +1,7 @@
 """Transferable, signed confirmation messages; execution is journaled at the target."""
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import embed as styled_embed
+from mitra_bot.discord_app.message_style import notice
 
 import base64
 import hashlib
@@ -50,10 +52,10 @@ def render_intent(intent: PowerIntent, key: bytes):
         intent.requester_id,
     )).decode().rstrip("=")
     scope = f"{intent.network}:{intent.guild_id}:{intent.channel_id}"
-    embed = discord.Embed(title=f"Confirm {intent.action.title()}", color=discord.Color.orange(),
-                          description=f"Target server: **{intent.server}**\nExpires <t:{intent.expires_at}:R>")
-    embed.add_field(name="Delay", value=f"{intent.delay_seconds} seconds")
-    embed.add_field(name="Force", value=str(intent.force))
+    embed = styled_embed(title=f"Confirm {intent.action} on {intent.server}", color=discord.Color.orange(),
+                          description=f"This will {'restart' if intent.action == 'restart' else 'shut down'} **{intent.server}**. Review the details before confirming.\n\nConfirmation expires <t:{intent.expires_at}:R>.")
+    embed.add_field(name="When", value="Immediately" if not intent.delay_seconds else f"After {intent.delay_seconds} seconds")
+    embed.add_field(name="Force apps to close", value="Yes — unsaved work may be lost" if intent.force else "No", inline=False)
     embed.add_field(name="Requested by", value=f"<@{intent.requester_id}>")
     embed.set_footer(text="Only administrators can confirm. The named server executes the action.")
     view = discord.ui.View(timeout=None)
@@ -111,19 +113,19 @@ async def handle_power_component(bot, interaction):
         intent, decision = decode_intent(mesh, interaction)
     except PeerError as exc:
         if await claim_interaction(interaction, delay=response_delay(mesh, mesh.config.resolved_state_owner, interaction.id)):
-            await interaction.followup.send(str(exc), ephemeral=True)
+            await interaction.followup.send(notice('Action could not finish', str(exc), tone='error'), ephemeral=True)
         return
     if not await claim_interaction(interaction, delay=response_delay(mesh, intent.server, interaction.id)):
         return
     user = interaction.user
     if not isinstance(user, discord.Member) or not any(role.name == bot.state.admin_role_name for role in user.roles):
-        await interaction.followup.send("Only members with the admin role can use power confirmations.", ephemeral=True)
+        await interaction.followup.send(notice('Administrator access required', "Only members with the admin role can use power confirmations.", tone='warning'), ephemeral=True)
         return
     request = PowerRequest(action=intent.action, delay_seconds=intent.delay_seconds, force=intent.force,
                            requester_id=str(intent.requester_id), confirmer_id=str(user.id),
                            decision="execute" if decision == "confirm" else "cancel")
     try:
         result = await mesh.power(intent.server, request, operation_id=intent.operation_id)
-        await interaction.edit_original_response(content=f"**{intent.server}**: {result}", embed=None, view=None)
+        await interaction.edit_original_response(content=notice('Power control', f"**{intent.server}**: {result}", tone='info'), embed=None, view=None)
     except PeerError as exc:
-        await interaction.followup.send(f"`{intent.server}`: {exc}", ephemeral=True)
+        await interaction.followup.send(notice('Power control', f"`{intent.server}`: {exc}", tone='info'), ephemeral=True)

@@ -1,5 +1,7 @@
 # mitra_bot/discord_app/cogs/power_cog.py
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import embed as styled_embed
+from mitra_bot.discord_app.message_style import notice
 
 import asyncio
 import logging
@@ -68,27 +70,26 @@ class PowerActionView(discord.ui.View):
     def _build_embed(self, *, state: str) -> discord.Embed:
         if state == "pending":
             color = discord.Color.orange()
-            title = f"Confirm {self.action.title()}"
-            summary = "This will modify server power state."
+            title = f"Confirm {self.action} on {self.server}"
+            summary = f"This will {'restart' if self.action == 'restart' else 'shut down'} the selected machine. Review the details before confirming."
         elif state == "confirmed":
             color = discord.Color.gold()
-            title = f"{self.action.title()} Confirmed"
-            summary = "Action has been queued."
+            title = f"{self.action.title()} requested for {self.server}"
+            summary = "The power command has been submitted. Completion has not yet been observed."
         else:
             color = discord.Color.green()
-            title = f"{self.action.title()} Canceled"
+            title = f"{self.action.title()} cancelled for {self.server}"
             summary = "Pending power action has been aborted."
 
-        embed = discord.Embed(
+        embed = styled_embed(
             title=title,
             description=summary,
             color=color,
         )
         embed.add_field(name="Action", value=f"`{self.action}`", inline=True)
         embed.add_field(name="Server", value=f"`{self.server}`", inline=True)
-        embed.add_field(name="Mode", value=f"`{self.mode}`", inline=True)
-        embed.add_field(name="Delay", value=f"`{self.delay_seconds}` sec", inline=True)
-        embed.add_field(name="Force", value=f"`{self.force}`", inline=True)
+        embed.add_field(name="When", value="Immediately" if not self.delay_seconds else f"After {self.delay_seconds} seconds", inline=True)
+        embed.add_field(name="Force apps to close", value="Yes — unsaved work may be lost" if self.force else "No", inline=False)
 
         embed.add_field(name="Requested By", value=f"<@{self.requester_id}>", inline=True)
         embed.add_field(
@@ -162,14 +163,14 @@ class PowerActionView(discord.ui.View):
     ) -> None:
         if not self._is_admin_user(interaction):
             await interaction.response.send_message(
-                "Only members with the admin role can confirm this action.",
+                notice('Administrator access required', "Only members with the admin role can confirm this action.", tone='warning'),
                 ephemeral=True,
             )
             return
 
         if self.confirmed or self.busy or self.canceled:
             await interaction.response.send_message(
-                "This action has already been confirmed.", ephemeral=True
+                notice('Power action already handled', "This action has already been confirmed.", tone='info'), ephemeral=True
             )
             return
 
@@ -210,7 +211,7 @@ class PowerActionView(discord.ui.View):
         except Exception as exc:
             # Never imply success or offer a one-click retry on an uncertain RPC.
             await interaction.edit_original_response(
-                content=f"Power action on `{self.server}` was not confirmed: {exc}",
+                content=notice('Action not confirmed', f"Power action on `{self.server}` was not confirmed: {exc}", tone='warning'),
                 embed=None, view=None,
             )
             self.stop()
@@ -223,13 +224,13 @@ class PowerActionView(discord.ui.View):
     ) -> None:
         if not self._is_admin_user(interaction):
             await interaction.response.send_message(
-                "Only members with the admin role can cancel this action.",
+                notice('Administrator access required', "Only members with the admin role can cancel this action.", tone='warning'),
                 ephemeral=True,
             )
             return
 
         if self.busy or self.canceled:
-            await interaction.response.send_message("An action is already in progress or canceled.", ephemeral=True)
+            await interaction.response.send_message(notice('An action is already in progress', "An action is already in progress or canceled.", tone='warning'), ephemeral=True)
             return
         self.busy = True
         await interaction.response.defer()
@@ -255,7 +256,7 @@ class PowerActionView(discord.ui.View):
         except Exception as ex:
             logging.exception("Power cancel failed from view.")
             await interaction.followup.send(
-                f"Cancel failed:\n```{ex}```", ephemeral=True
+                notice('Action could not finish', f"Cancel failed:\n```{ex}```", tone='error'), ephemeral=True
             )
             return
         finally:
@@ -307,7 +308,7 @@ class PowerCog(commands.Cog):
         try:
             target = resolve_server(self.bot, server)
         except PeerError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('Action could not finish', str(exc), tone='error'), ephemeral=True)
             return
         mesh = getattr(self.bot, "peer_service", None)
         if mesh is not None:
@@ -363,7 +364,7 @@ class PowerCog(commands.Cog):
         try:
             target = resolve_server(self.bot, server)
         except PeerError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('Action could not finish', str(exc), tone='error'), ephemeral=True)
             return
         mesh = getattr(self.bot, "peer_service", None)
         if mesh is not None:
@@ -409,7 +410,7 @@ class PowerCog(commands.Cog):
                 message = await mesh.power(target, PowerRequest(
                     action="cancel", requester_id=str(ctx.user.id), confirmer_id=str(ctx.user.id),
                 ), operation_id=operation_id(mesh.config.network_id, ctx.interaction.id))
-                await ctx.respond(f"`{target}`: {message}", ephemeral=True)
+                await ctx.respond(notice('Power control', f"`{target}`: {message}", tone='info'), ephemeral=True)
                 return
             view = PowerActionView(
                 action="cancel", delay_seconds=0, force=False,
@@ -423,10 +424,10 @@ class PowerCog(commands.Cog):
             )
             if not view.remote:
                 clear_power_restart_notice()
-            await ctx.respond(f"Pending shutdown/restart canceled on `{target}`.", ephemeral=True)
+            await ctx.respond(notice('Power action cancelled', f"Pending shutdown/restart canceled on `{target}`.", tone='success'), ephemeral=True)
         except Exception as ex:
             logging.exception("Power cancel failed.")
-            await ctx.followup.send(f"Cancel failed:\n```{ex}```", ephemeral=True)
+            await ctx.followup.send(notice('Action could not finish', f"Cancel failed:\n```{ex}```", tone='error'), ephemeral=True)
 
 
 def setup(bot: discord.Bot) -> None:

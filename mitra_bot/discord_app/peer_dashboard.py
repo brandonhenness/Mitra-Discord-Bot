@@ -1,5 +1,7 @@
 """Reconstructible read-only dashboard controls; no process-local view callbacks."""
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import embed as styled_embed
+from mitra_bot.discord_app.message_style import notice
 
 import asyncio
 import hashlib
@@ -60,7 +62,7 @@ async def build_dashboard(mesh, subject=None, observer=None, hours=24, page=0, a
     start = end-hours*3600
     store = mesh.monitor.store
     series = {node: store.series(observer, node, start, end) for node in nodes}
-    embed = discord.Embed(title=f"Server {'status' if subject else 'dashboard'} · {hours}h", color=discord.Color.blue())
+    embed = styled_embed(title=f"Server {'status' if subject else 'dashboard'} · {hours}h", color=discord.Color.blue())
     embed.description = f"Observed by **{observer}** · responding instance **{mesh.config.node_id}**\nAvailability is based on sampled peer reachability."
     gap = store.db.execute("SELECT gap FROM health_cursors WHERE observer=?", (observer,)).fetchone()
     if gap and gap[0]:
@@ -110,7 +112,7 @@ async def handle_dashboard_component(bot, interaction):
         return
     if (interaction.guild is None or not isinstance(interaction.user, discord.Member)
             or not member_has_role(interaction.user, bot.state.admin_role_name)):
-        await interaction.followup.send("You do not have permission to view this dashboard.", ephemeral=True)
+        await interaction.followup.send(notice('Permission required', "You do not have permission to view this dashboard.", tone='warning'), ephemeral=True)
         return
     try:
         if interaction.message.author.id != bot.user.id:
@@ -137,4 +139,4 @@ async def handle_dashboard_component(bot, interaction):
         payload = await build_dashboard(mesh, subject, observer, hours, page, advanced=advanced)
         await interaction.followup.send(**payload, ephemeral=True)
     except (ValueError, KeyError, IndexError):
-        await interaction.followup.send("This dashboard control is invalid or membership changed. Run /servers dashboard again.", ephemeral=True)
+        await interaction.followup.send(notice('Server dashboard', "This dashboard control is invalid or membership changed. Run /servers dashboard again.", tone='info'), ephemeral=True)

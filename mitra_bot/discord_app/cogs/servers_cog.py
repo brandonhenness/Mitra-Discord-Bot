@@ -1,3 +1,6 @@
+from mitra_bot.discord_app.message_style import embed as styled_embed
+from mitra_bot.discord_app.message_style import notice
+from mitra_bot.discord_app.message_style import pages
 # Pycord evaluates Option objects while decorating commands. Postponed annotations
 # turn these into strings, registering every option as text and breaking parsing.
 
@@ -30,8 +33,8 @@ class ServersCog(commands.Cog):
         from mitra_bot.discord_app.peer_operations import doctor
         lines = await doctor(mesh,self.bot,ctx.guild)
         # Bound each message even with maximum-length node IDs and a large mesh.
-        for start in range(0,len(lines),6):
-            await ctx.respond("\n".join(lines[start:start+6]), ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        for message in pages("Server health check", lines):
+            await ctx.respond(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @servers.command(name="alerts-test", description="Send a labeled test alert; optionally mention this server's subscribers")
     async def alerts_test(self, ctx: discord.ApplicationContext,
@@ -55,7 +58,7 @@ class ServersCog(commands.Cog):
                 raise ValueError("Configure a valid subscriber role before testing mentions.")
             if mention and not role.mentionable and not permissions.mention_everyone:
                 raise ValueError("The subscriber role cannot be mentioned in this channel.")
-            embed = discord.Embed(title=f"TEST ONLY — {server} monitoring alert",
+            embed = styled_embed(title=f"TEST ONLY — {server} monitoring alert",
                 description=f"Requested by <@{ctx.author.id}> through `{mesh.config.node_id}`.\n"
                             "This is a delivery test, not an outage. No health history or incident was changed.",
                 color=discord.Color.blue())
@@ -64,10 +67,10 @@ class ServersCog(commands.Cog):
                            nonce=str(ctx.interaction.id),enforce_nonce=True,
                            allowed_mentions={"parse":[],"users":[],"roles":[str(role.id)] if mention else []})
             result = await self.bot.http.request(Route("POST","/channels/{channel_id}/messages",channel_id=channel.id),json=payload)
-            await ctx.respond(f"Test sent: https://discord.com/channels/{ctx.guild.id}/{channel.id}/{result['id']}\n"
-                              + ("Subscriber role mentioned." if mention else "No subscribers were pinged. Use mention:true to test the role mention."),ephemeral=True)
+            await ctx.respond(notice('Test alert sent', f"Test sent: https://discord.com/channels/{ctx.guild.id}/{channel.id}/{result['id']}\n"
+                              + ("Subscriber role mentioned." if mention else "No subscribers were pinged. Use mention:true to test the role mention."), tone='success'),ephemeral=True)
         except (ValueError,PeerError,discord.HTTPException,OSError) as exc:
-            await ctx.respond(f"Test delivery was not confirmed: {exc}. Check the destination before retrying.",ephemeral=True)
+            await ctx.respond(notice('Action not confirmed', f"Test delivery was not confirmed: {exc}. Check the destination before retrying.", tone='warning'),ephemeral=True)
 
     @servers.command(name="maintenance", description="Pause a server's alerts network-wide while continuing health history")
     async def maintenance_command(self, ctx: discord.ApplicationContext,
@@ -84,9 +87,9 @@ class ServersCog(commands.Cog):
             pending = await self._save_settings(mesh,[Setting(revision=str(ctx.interaction.id),guild=1,subject=server,
                 maintenance_until=until,maintenance_reason=reason)])
             message = f"`{server}` maintenance ends <t:{int(until)}:R>. History continues; outage/recovery alerts are suppressed until then." if minutes else f"Maintenance ended for `{server}`."
-            await ctx.respond(message+f" Replication pending on {pending} peer(s).",ephemeral=True)
+            await ctx.respond(notice('Server monitoring', message+f" Replication pending on {pending} peer(s).", tone='info'),ephemeral=True)
         except (PeerError,ValueError) as exc:
-            await ctx.respond(str(exc),ephemeral=True)
+            await ctx.respond(notice('Server request could not finish', str(exc), tone='error'),ephemeral=True)
 
     @servers.command(name="dashboard-pin", description="Create or update one shared, automatically refreshed dashboard in this guild")
     async def dashboard_pin(self, ctx: discord.ApplicationContext,
@@ -122,10 +125,10 @@ class ServersCog(commands.Cog):
             # Save before pinning: even a pin permission failure must not orphan a live dashboard.
             pending = await self._save_settings(mesh,[setting])
             await message.pin(reason="Mitra shared server dashboard")
-            await ctx.respond(f"Shared dashboard: {message.jump_url}\nRefresh every {interval}s, with peer takeover after a stale update. "
-                              f"Replication pending on {pending} peer(s). Anyone with channel access can view it.",ephemeral=True)
+            await ctx.respond(notice('Dashboard configured', f"Shared dashboard: {message.jump_url}\nRefresh every {interval}s, with peer takeover after a stale update. "
+                              f"Replication pending on {pending} peer(s). Anyone with channel access can view it.", tone='success'),ephemeral=True)
         except (ValueError,PeerError,discord.HTTPException,OSError) as exc:
-            await ctx.respond(f"Dashboard setup was not fully confirmed: {exc}. Inspect the channel and /servers doctor before retrying.",ephemeral=True)
+            await ctx.respond(notice('Dashboard setup not confirmed', f"{exc}\n\nInspect the channel and run `/servers doctor` before retrying.", tone='warning'),ephemeral=True)
         finally:
             if payload:
                 payload["file"].close()
@@ -138,11 +141,11 @@ class ServersCog(commands.Cog):
             return
         current = mesh.monitor.store.setting(ctx.guild.id,"@dashboard")
         if not current:
-            await ctx.respond("No shared dashboard is configured.",ephemeral=True)
+            await ctx.respond(notice('No dashboard configured', "No shared dashboard is configured.", tone='info'),ephemeral=True)
             return
         current.update(revision=str(ctx.interaction.id),enabled=False)
         pending = await self._save_settings(mesh,[Setting.model_validate(current)])
-        await ctx.respond(f"Automatic updates stopped. The existing message remains as a timestamped snapshot. Replication pending on {pending} peer(s).",ephemeral=True)
+        await ctx.respond(notice('Dashboard refresh stopped', f"Automatic updates stopped. The existing message remains as a timestamped snapshot. Replication pending on {pending} peer(s).", tone='success'),ephemeral=True)
 
     async def _mesh(self, ctx, admin=True):
         if admin:
@@ -151,11 +154,11 @@ class ServersCog(commands.Cog):
                 await guard
                 return None
         elif ctx.guild is None or not isinstance(ctx.author, discord.Member):
-            await ctx.respond("Use this command in a Discord server.", ephemeral=True)
+            await ctx.respond(notice('Use this command in Discord', "Use this command in a Discord server.", tone='warning'), ephemeral=True)
             return None
         mesh = getattr(self.bot, "peer_service", None)
         if mesh is None or mesh.monitor is None:
-            await ctx.respond("Private peer monitoring is not enabled on this instance.", ephemeral=True)
+            await ctx.respond(notice('Server monitoring', "Private peer monitoring is not enabled on this instance.", tone='info'), ephemeral=True)
             return None
         return mesh
 
@@ -171,7 +174,7 @@ class ServersCog(commands.Cog):
         try:
             await ctx.respond(**await build_dashboard(mesh, server, observer, hours), ephemeral=True)
         except (PeerError, ValueError) as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('Server request could not finish', str(exc), tone='error'), ephemeral=True)
 
     @servers.command(name="dashboard", description="Show availability timelines for all servers")
     async def dashboard(self, ctx: discord.ApplicationContext,
@@ -185,7 +188,7 @@ class ServersCog(commands.Cog):
         try:
             await ctx.respond(**await build_dashboard(mesh, None, observer, hours, page-1), ephemeral=True)
         except (PeerError, ValueError) as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('Server request could not finish', str(exc), tone='error'), ephemeral=True)
 
     @servers.command(name="incidents", description="Show observed outages and recoveries")
     async def incidents(self, ctx: discord.ApplicationContext,
@@ -199,14 +202,16 @@ class ServersCog(commands.Cog):
             mesh.resolve(server)
             observer = mesh.resolve(observer or mesh.config.node_id)
         except PeerError as exc:
-            await ctx.respond(str(exc), ephemeral=True)
+            await ctx.respond(notice('Server request could not finish', str(exc), tone='error'), ephemeral=True)
             return
         rows = mesh.monitor.store.incidents(observer, server, limit=8, offset=(page-1)*8)
-        embed = discord.Embed(title=f"{server}: incidents observed by {observer}", color=discord.Color.blue())
+        embed = styled_embed(title=f"Connection history for {server}", description=f"Observed by **{observer}**", color=discord.Color.blue())
         for item in rows:
             end = f"<t:{int(item['recovered'])}:F>" if item["recovered"] else "Not yet observed recovered"
-            embed.add_field(name=f"{item['kind']} connection · {item['reason']}",
-                            value=f"First failure <t:{int(item['start'])}:F>\nConfirmed <t:{int(item['detected'])}:F>\nRecovery: {end}", inline=False)
+            kind = "Peer connection" if item['kind'] == 'peer' else "Discord connection"
+            status = "Recovered" if item['recovered'] else "Recovery not observed"
+            embed.add_field(name=f"{kind} — {status}",
+                            value=f"**Reason** {item['reason']}\n**First failure** <t:{int(item['start'])}:f>\n**Confirmed** <t:{int(item['detected'])}:f>\n**Recovery** {end}", inline=False)
         if not rows:
             embed.description = "No recorded incidents on this page. Missing observations do not prove uptime."
         embed.set_footer(text=f"Page {page} · observer downtime is unknown coverage")
@@ -255,13 +260,14 @@ class ServersCog(commands.Cog):
                 value = Setting.model_validate(previous) if previous else Setting(revision=revision, guild=ctx.guild.id, subject=node)
                 values.append(value.model_copy(update={"revision": revision, "role": role.id}))
             pending = await self._save_settings(mesh, values)
-            await ctx.respond(f"Health alerts {'enabled' if enabled else 'disabled'} in {channel.mention}. "
-                              f"{role.mention} subscribes to IP changes and health alerts for all servers. "
-                              f"Existing subscribers migrated. Replication pending on {pending} peer(s). "
-                              "Use `/alerts subscribe` or `/alerts unsubscribe`.",
+            await ctx.respond(notice('Alert settings saved', f"**Health alerts** {'Enabled' if enabled else 'Disabled'}\n"
+                              f"**Channel** {channel.mention}\n**Subscriber role** {role.mention}\n\n"
+                              "One subscription covers IP changes and health alerts for all servers. Existing subscribers migrated.\n\n"
+                              f"**Settings sync** Waiting for {pending} peer(s).\n"
+                              "Use `/alerts subscribe` or `/alerts unsubscribe`.", tone='success'),
                               allowed_mentions=discord.AllowedMentions.none(), ephemeral=True)
         except (PeerError, ValueError, discord.HTTPException) as exc:
-            await ctx.respond(f"Could not configure alerts: {exc}", ephemeral=True)
+            await ctx.respond(notice('Server request could not finish', f"Could not configure alerts: {exc}", tone='error'), ephemeral=True)
 
     alerts_group = discord.SlashCommandGroup("alerts", "Unified Mitra alert subscriptions")
 
@@ -282,9 +288,9 @@ class ServersCog(commands.Cog):
             verify_channel(channel, ctx.guild)
             await configure_shared_role(self.bot, ctx.guild)
             set_notification_channel_id_for_guild(ctx.guild.id, channel.id)
-            await ctx.respond("Mitra Alerts configured. Use /alerts subscribe for all operational alerts.", ephemeral=True)
+            await ctx.respond(notice('Alerts are ready', "Mitra Alerts configured. Use /alerts subscribe for all operational alerts.", tone='success'), ephemeral=True)
         except (ValueError, discord.HTTPException) as exc:
-            await ctx.respond(f"Could not configure alerts: {exc}", ephemeral=True)
+            await ctx.respond(notice('Server request could not finish', f"Could not configure alerts: {exc}", tone='error'), ephemeral=True)
 
     @alerts_group.command(name="subscribe", description="Subscribe to all Mitra operational alerts")
     async def alerts_subscribe(self, ctx: discord.ApplicationContext,
@@ -295,14 +301,6 @@ class ServersCog(commands.Cog):
     async def alerts_unsubscribe(self, ctx: discord.ApplicationContext,
                                  user: discord.Option(discord.Member, "Member to unsubscribe (Mitra admins only)") = None):
         await subscription(ctx, False, user)
-
-    @servers.command(name="subscribe", description="Subscribe to all Mitra operational alerts")
-    async def subscribe(self, ctx: discord.ApplicationContext):
-        await subscription(ctx, True)
-
-    @servers.command(name="unsubscribe", description="Unsubscribe from all Mitra operational alerts")
-    async def unsubscribe(self, ctx: discord.ApplicationContext):
-        await subscription(ctx, False)
 
     @servers.command(name="monitoring", description="View or change shared network monitoring thresholds and retention")
     async def monitoring(self, ctx: discord.ApplicationContext,
@@ -327,7 +325,11 @@ class ServersCog(commands.Cog):
             pending = await self._save_settings(mesh, [Setting(revision=str(ctx.interaction.id), guild=1, subject="@monitoring",
                                                               policy=MonitorPolicy(**policy))])
             suffix = f"\nSaved network-wide; replication pending on {pending} peer(s)."
-        await ctx.respond("Monitoring policy:\n" + "\n".join(f"`{key}`: {value}" for key,value in policy.items()) + suffix,
+        labels = {"interval": "Check interval (seconds)", "timeout": "Connection timeout (seconds)",
+                  "failures": "Failures before confirming an outage", "down_seconds": "Minimum outage duration (seconds)",
+                  "cooldown": "Repeat-mention cooldown (seconds)", "raw_days": "Detailed history (days)",
+                  "history_days": "Graph history (days)"}
+        await ctx.respond(notice('Monitoring settings', "\n".join(f"**{labels.get(key, key.replace('_', ' ').capitalize())}** {value}" for key,value in policy.items()) + suffix),
                           ephemeral=True)
 
     @servers.command(name="list", description="List this server and its configured peers")
@@ -338,18 +340,26 @@ class ServersCog(commands.Cog):
             return
         mesh = getattr(self.bot, "peer_service", None)
         if mesh is None:
-            await ctx.respond("`local` — this server (private networking disabled)", ephemeral=True)
+            await ctx.respond(notice('Server monitoring', "`local` — this server (private networking disabled)", tone='info'), ephemeral=True)
             return
-        lines = [f"Responding instance: `{mesh.config.node_id}`",
-                 f"Application-state owner: `{mesh.config.resolved_state_owner}`",
-                 f"`{mesh.config.node_id}` — local, process uptime {mesh.local_health()['process_uptime_seconds']}s"]
+        heading = ("### Server connections\n"
+                   f"Responding server: **{mesh.config.node_id}** · Shared settings owner: **{mesh.config.resolved_state_owner}**\n\n")
+        uptime = max(0, int(mesh.local_health()['process_uptime_seconds']))
+        days, remainder = divmod(uptime, 86400)
+        hours, remainder = divmod(remainder, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        duration = f"{days}d {hours}h" if days else f"{hours}h {minutes}m" if hours else f"{minutes}m {seconds}s"
+        lines = [f"**🖥️ {mesh.config.node_id} — This server**\nBot running for {duration}"]
         for node in sorted(mesh.peers):
             state = mesh.online.get(node)
-            status = "reachable" if state is True else "unreachable" if state is False else "not checked yet"
+            status = "Reachable" if state is True else "Unreachable" if state is False else "Not checked yet"
+            icon = "🟢" if state is True else "🔴" if state is False else "⚪"
             health = mesh.health.get(node)
+            detail = ""
             if health:
-                status += f" | last seen <t:{health['captured_at']}:R> | Discord={'connected' if health['discord_connected'] else 'disconnected'}"
-            lines.append(f"`{node}` — {status}")
-        # Stay below Discord's message limit for the maximum mesh size.
-        for start in range(0, len(lines), 20):
-            await ctx.respond("\n".join(lines[start:start + 20]), ephemeral=True)
+                detail = (f"\nLast contact <t:{int(health['captured_at'])}:R>"
+                          f" · Discord {'connected' if health['discord_connected'] else 'disconnected'} at that contact")
+            lines.append(f"**{icon} {node} — {status}**{detail}")
+        for start in range(0, len(lines), 6):
+            await ctx.respond(heading + "\n\n".join(lines[start:start + 6]), ephemeral=True,
+                              allowed_mentions=discord.AllowedMentions.none())

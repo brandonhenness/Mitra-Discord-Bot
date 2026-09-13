@@ -1,13 +1,17 @@
 """Discord delivery adapter. Never uses Discord as a distributed action lock."""
 from __future__ import annotations
+from mitra_bot.discord_app.message_style import embed as styled_embed
 
 import hashlib
 import json
 import time
 from datetime import datetime, timezone
+from urllib.parse import quote, unquote
 
 import discord
 from discord.http import Route
+
+ALERT_DETAILS_URL = "https://github.com/brandonhenness/Mitra-Discord-Bot/blob/main/docs/operations-recovery.md"
 
 
 class PeerAlertDelivery:
@@ -34,6 +38,10 @@ class PeerAlertDelivery:
                 continue
             for embed in message.embeds:
                 footer = getattr(embed.footer, "text", None) or ""
+                # New alerts carry delivery metadata in a URL fragment, not visible
+                # footer text. Continue recognizing alerts sent by older releases.
+                if not footer.startswith(prefix) and (embed.url or "").startswith(ALERT_DETAILS_URL + "#"):
+                    footer = unquote(embed.url.split("#", 1)[1])
                 if not footer.startswith(prefix):
                     continue
                 try:
@@ -58,27 +66,43 @@ class PeerAlertDelivery:
         if role and role.id == channel.guild.id:
             raise ValueError("Everyone cannot be a subscriber role")
         observer = self.mesh.config.node_id
+        peer = incident["kind"] == "peer"
+        recovered = incident["recovered"] is not None
         if summary:
-            title = f"{subject}: recovered outage (delayed report)"
+            title = (f"🟢 Connection to {subject} restored (delayed report)" if peer
+                     else f"🟢 {subject} reconnected to Discord (delayed report)")
         elif kind == "recovery":
-            title = f"{subject}: connection recovered"
+            title = f"🟢 Connection to {subject} restored" if peer else f"🟢 {subject} reconnected to Discord"
         else:
-            title = f"{subject}: {'unreachable' if incident['kind'] == 'peer' else 'Discord disconnected'}"
-        description = (f"Observed by **{observer}**.\n"
-                       f"First failure: <t:{int(incident['start'])}:F>\n"
-                       f"Confirmed: <t:{int(incident['detected'])}:F>\n")
-        if incident["last_success"] is not None:
-            description += f"Last successful contact: <t:{int(incident['last_success'])}:F>\n"
-        if incident["recovered"] is not None:
-            description += f"Recovery confirmed: <t:{int(incident['recovered'])}:F>\n"
-        description += ("The machine, Mitra process, or network connection may be unavailable."
-                        if incident["kind"] == "peer" and incident["recovered"] is None
-                        else "Peer reachability and Discord connectivity are monitored separately.")
-        embed = discord.Embed(title=title, description=description,
-                              color=discord.Color.green() if incident["recovered"] else discord.Color.orange(),
+            title = f"🔴 Lost contact with {subject}" if peer else f"🟠 {subject} lost its Discord connection"
+        if recovered:
+            description = "Peer contact has been restored." if peer else "The bot has reconnected to Discord."
+        else:
+            description = ("The observing server cannot reach this peer. The machine, bot process, or network may be unavailable."
+                           if peer else "The peer reported that its bot connection to Discord was lost.")
+        embed = styled_embed(title=title, description=description,
+                              color=discord.Color.green() if recovered else discord.Color.red() if peer else discord.Color.orange(),
                               timestamp=datetime.now(timezone.utc))
-        embed.set_footer(text=prefix + json.dumps(dict(key=exact, phase=phase, start=incident["start"],
-                                                      end=incident["recovered"]), separators=(",", ":")))
+        embed.add_field(name="Monitoring", value="Peer connection" if peer else "Discord connection", inline=True)
+        embed.add_field(name="Observed by", value=observer, inline=True)
+        if recovered:
+            seconds = max(0, int(incident["recovered"] - incident["start"]))
+            hours, remainder = divmod(seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            duration = f"{hours}h {minutes}m {seconds}s" if hours else f"{minutes}m {seconds}s" if minutes else f"{seconds}s"
+            embed.add_field(name="Observed interruption", value=duration, inline=True)
+        timeline = (f"First failure · <t:{int(incident['start'])}:f>\n"
+                    f"Outage confirmed · <t:{int(incident['detected'])}:f>")
+        if recovered:
+            timeline += f"\nRecovery confirmed · <t:{int(incident['recovered'])}:f>"
+        embed.add_field(name="Timeline", value=timeline, inline=False)
+        if incident["last_success"] is not None:
+            embed.add_field(name="Last successful contact before interruption",
+                            value=f"<t:{int(incident['last_success'])}:f>", inline=False)
+        embed.set_footer(text="Mitra • Peer and Discord connectivity are monitored separately")
+        marker = prefix + json.dumps(dict(key=exact, phase=phase, start=incident["start"],
+                                          end=incident["recovered"]), separators=(",", ":"))
+        embed.url = ALERT_DETAILS_URL + "#" + quote(marker, safe="")
         # py-cord's high-level send does not expose enforce_nonce in all supported versions.
         # Its authenticated HTTP client preserves Discord rate-limit handling.
         payload = dict(content=role.mention if role else "", embeds=[embed.to_dict()], nonce=exact,
